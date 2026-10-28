@@ -49,7 +49,8 @@ function doPost(e) {
 }
 function api_(accion, arg) {
   const ACCIONES = { obtenerConfig: obtenerConfig, obtenerResultados: obtenerResultados, guardarParaQue: guardarParaQue, guardarPregunta: guardarPregunta,
-    guardarVotos: guardarVotos, guardarMesa: guardarMesa, fijarDimensiones: fijarDimensiones, ocultarPregunta: ocultarPregunta };
+    guardarVotos: guardarVotos, guardarMesa: guardarMesa, fijarDimensiones: fijarDimensiones, ocultarPregunta: ocultarPregunta,
+    fijarActores: fijarActores, cargarSimulacion: cargarSimulacion, borrarSimulacion: borrarSimulacion };
   try {
     if (!ACCIONES[accion]) throw new Error('Acción desconocida');
     return salida_({ ok: true, data: ACCIONES[accion](arg) });
@@ -61,7 +62,7 @@ function salida_(o) { return ContentService.createTextOutput(JSON.stringify(o)).
 function validarClave_(r) { if (!r || String(r.clave || '') !== String(CLAVE_FACILITADOR)) throw new Error('Clave de facilitador incorrecta'); }
 
 function obtenerConfig() {
-  return { dimensiones: TALLER.dimensiones, ejemplos: TALLER.ejemplos, destinos: TALLER.destinos, activas: activas_(),
+  return { dimensiones: TALLER.dimensiones, ejemplos: TALLER.ejemplos, destinos: destinos_(), activas: activas_(),
     areas: AREAS, fuentes: FUENTES, frecuencias: FRECUENCIAS, acceso: ACCESO, rutas: RUTAS, cuando: CUANDO,
     formatos: FORMATOS, responsables: responsables_(), maxVotos: MAX_VOTOS };
 }
@@ -103,13 +104,27 @@ function validarPersona_(r) {
   if (!r || AREAS.indexOf(r.area) < 0) throw new Error('Seleccione su área.');
   return { area: r.area, mesa: enLista_(String(r.mesa || ''), MESAS) };
 }
-function nombresDestinos_() { return TALLER.destinos.map(function (d) { return d.id; }); }
+function config_(clave) {
+  const f = filas_('Config').filter(function (x) { return x[0] === clave; })[0];
+  try { return f ? JSON.parse(f[1]) : null; } catch (e) { return null; }
+}
+function fijarConfig_(clave, valor) { upsert_('Config', function (f) { return f[0] === clave; }, [clave, JSON.stringify(valor)]); }
+// Actores a quienes se reporta: lista propuesta (Datos.gs) + los que agrega el facilitador en el momento 1.
+function extras_() { const v = config_('actores'); return Array.isArray(v) ? v : []; }
+function destinos_() {
+  const base = TALLER.destinos.map(function (d) { return d.id; });
+  return TALLER.destinos.concat(extras_().filter(function (x) { return base.indexOf(x) < 0; }).map(function (x) { return { id: x, marco: 'Agregado en el taller' }; }));
+}
+function nombresDestinos_() { return destinos_().map(function (d) { return d.id; }); }
+function fijarActores(r) {
+  validarClave_(r);
+  const v = lista_(r.lista, null, 12).map(function (x) { return x.slice(0, 60); });
+  conLock_(function () { fijarConfig_('actores', v); });
+  return { ok: true, destinos: destinos_() };
+}
 
 /* ---------- Config: dimensiones acordadas ---------- */
-function activas_() {
-  const f = filas_('Config').filter(function (x) { return x[0] === 'dimensiones'; })[0];
-  try { const v = f ? JSON.parse(f[1]) : null; return Array.isArray(v) && v.length ? v : null; } catch (e) { return null; }
-}
+function activas_() { const v = config_('dimensiones'); return Array.isArray(v) && v.length ? v : null; }
 function fijarDimensiones(r) {
   validarClave_(r);
   const v = lista_(r.lista, null, 8).map(function (x) { return x.slice(0, 60); });
@@ -130,6 +145,9 @@ function guardarParaQue(r) {
   });
   const otro = limpiar_(r.otro).slice(0, 60);
   if (otro) filas.push([ahora, envio, p.area, p.mesa, 'Otro: ' + otro, limpiar_(r.otroEjemplo)]);
+  // Actores que faltan en la lista de destinatarios (separados por coma o punto y coma).
+  limpiar_(r.actores).split(/[;,]/).map(function (x) { return x.trim().slice(0, 60); }).filter(String).slice(0, 5)
+    .forEach(function (a) { filas.push([ahora, envio, p.area, p.mesa, 'Actor: ' + a, '']); });
   if (!filas.length) throw new Error('Marque al menos un para qué.');
   conLock_(function () { const sh = hoja_('ParaQue'); sh.getRange(sh.getLastRow() + 1, 1, filas.length, HOJAS.ParaQue.length).setValues(filas); });
   return { ok: true };
@@ -144,7 +162,8 @@ function guardarPregunta(r) {
   if (!dims.length) throw new Error('Marque al menos un para qué.');
   return conLock_(function () {
     const sh = hoja_('Preguntas');
-    const id = 'Q' + ('00' + sh.getLastRow()).slice(-3);
+    const max = filas_('Preguntas').reduce(function (m, f) { const n = /^Q(\d+)$/.exec(f[1]); return n ? Math.max(m, Number(n[1])) : m; }, 0);
+    const id = 'Q' + ('00' + (max + 1)).slice(-3);
     sh.appendRow([new Date(), id, p.area, p.mesa, texto, dims.join('; '), lista_(r.destinos, nombresDestinos_()).join('; '), limpiar_(r.decision), '']);
     return { ok: true, id: id };
   });
@@ -210,9 +229,11 @@ function upsert_(nombre, coincide, fila) {
 /* ---------- Resultados ---------- */
 function obtenerResultados() {
   const pq = {}, envPQ = {};
+  const actores = {};
   filas_('ParaQue').forEach(function (f) {
     envPQ[f[1]] = true;
-    const k = f[4];
+    const k = String(f[4]);
+    if (k.indexOf('Actor: ') === 0) { const a = k.slice(7); actores[a] = (actores[a] || 0) + 1; return; }
     if (!pq[k]) pq[k] = { nombre: k, votos: 0, ejemplos: [] };
     pq[k].votos++;
     if (f[5]) pq[k].ejemplos.push(f[5]);
@@ -225,6 +246,85 @@ function obtenerResultados() {
     return { mesa: String(f[1]), id: f[2], pregunta: f[3], dims: f[4], fuente: f[5], produce: f[6], frecuencia: f[7], semaforo: f[8], falta: f[9], ruta: f[10],
       paso: f[11], responsable: f[12], cuando: f[13], uso: f[14], frecUso: f[15], formato: f[16], frecReporte: f[17], valida: f[18], publica: f[19], recibe: f[20], notas: f[21] };
   });
-  return { activas: activas_(), paraque: Object.keys(pq).map(function (k) { return pq[k]; }).sort(function (a, b) { return b.votos - a.votos; }),
+  return { activas: activas_(), destinos: destinos_(), actores: Object.keys(actores).map(function (a) { return { nombre: a, votos: actores[a] }; }),
+    simulacion: config_('simulacion') === true, paraque: Object.keys(pq).map(function (k) { return pq[k]; }).sort(function (a, b) { return b.votos - a.votos; }),
     respuestasParaQue: Object.keys(envPQ).length, preguntas: preguntas, ranking: ranking, votantes: Object.keys(votantes).length, matriz: matriz };
+}
+
+/* ---------- Simulación (solo para probar la herramienta antes del taller) ---------- */
+// Los datos simulados llevan Envío "SIM-…" e ID "S…", y textos marcados [Simulado]. borrarSimulacion los quita todos.
+function cargarSimulacion(r) {
+  validarClave_(r);
+  borrarSimulacion(r);
+  const ahora = new Date();
+  const areas = AREAS.filter(function (a) { return a !== 'Otra'; });
+  const N = TALLER.dimensiones.map(function (d) { return d.nombre; });
+  const elecciones = [[0, 2], [0, 3], [1, 0], [2, 5], [0, 1, 3], [3], [2, 4], [0, 2], [4, 1], [5, 2], [0], [3, 2], [1, 4], [2, 0]];
+  const pq = [];
+  elecciones.forEach(function (sel, i) {
+    const env = 'SIM-' + ('0' + (i + 1)).slice(-2), area = areas[i % areas.length], mesa = String(i % 3 + 1);
+    sel.forEach(function (k, j) { pq.push([ahora, env, area, mesa, N[k], j === 0 && i % 3 === 0 ? '[Simulado] ' + TALLER.dimensiones[k].ejemplo : '']); });
+  });
+  pq.push([ahora, 'SIM-03', areas[2], '3', 'Otro: Proteger a NNA en tránsito [simulado]', '']);
+  pq.push([ahora, 'SIM-05', areas[4], '2', 'Actor: Personería Distrital [simulado]', '']);
+  pq.push([ahora, 'SIM-09', areas[8 % areas.length], '3', 'Actor: Personería Distrital [simulado]', '']);
+  pq.push([ahora, 'SIM-11', areas[10 % areas.length], '2', 'Actor: Instituto Colombiano de Bienestar Familiar [simulado]', '']);
+  const dest = TALLER.destinos.map(function (d) { return d.id; });
+  const preg = TALLER.ejemplos.map(function (x, i) {
+    return [ahora, 'S' + ('0' + (i + 1)).slice(-2), areas[i % areas.length], String(i % 3 + 1), '[Simulado] ' + x.texto,
+      x.dims.map(function (id) { return TALLER.dimensiones.filter(function (d) { return d.id === id; })[0].nombre; }).join('; '),
+      [dest[(i * 3 + 2) % dest.length], dest[(i * 5 + 1) % dest.length]].filter(function (v, k, a) { return a.indexOf(v) === k; }).join('; '), '', ''];
+  });
+  preg.push([ahora, 'S11', areas[1], '2', '[Simulado] ¿Cuántas personas atendidas cada mes son de primera vez?', N[0] + '; ' + N[2], dest[2], 'Planear cupos del mes', '']);
+  preg.push([ahora, 'S12', areas[3], '1', '[Simulado] ¿Cuántas personas atendemos al mes?', N[0], dest[2], '', 'Sí']);
+  const pesos = [9, 3, 6, 4, 8, 7, 5, 2, 6, 1, 4, 0];
+  const votos = [];
+  for (let v = 0; v < 14; v++) {
+    const orden = preg.map(function (q, k) { return { id: q[1], s: pesos[k] + ((v * 7 + k * 3) % 5) }; }).filter(function (x) { return x.id !== 'S12'; })
+      .sort(function (a, b) { return b.s - a.s; }).slice(0, MAX_VOTOS);
+    orden.forEach(function (x) { votos.push([ahora, 'SIM-' + ('0' + (v + 1)).slice(-2), areas[v % areas.length], String(v % 3 + 1), x.id]); });
+  }
+  conLock_(function () {
+    escribir_('ParaQue', pq); escribir_('Preguntas', preg); escribir_('Votos', votos);
+    fijarConfig_('dimensiones', [N[0], N[2], N[3], N[4]]);
+    fijarConfig_('actores', ['Personería Distrital [simulado]']);
+    fijarConfig_('simulacion', true);
+  });
+  // Matriz: las 6 más votadas, repartidas por turnos entre las mesas.
+  const R = obtenerResultados().ranking.slice(0, 6);
+  const RS = responsables_();
+  const ej = [
+    { fuente: 'Registros de la atención · Archivo 1S (indicadores)', semaforo: 'amarillo', falta: '[Simulado] ID único para no contar dos veces', ruta: 'construir', paso: '[Simulado] Regla de conteo de personas distintas', cuando: CUANDO[0], uso: '[Simulado] Reporte mensual del Plan', formato: 'Tablero' },
+    { fuente: 'Registros de la atención · Registro de remisiones', semaforo: 'rojo', falta: '[Simulado] No se sabe si la persona recibió el servicio', ruta: 'gestionar', paso: '[Simulado] Acuerdo de retorno de información con entidades receptoras', cuando: CUANDO[1], uso: '[Simulado] Ajustar la ruta con cada secretaría', formato: 'Informe' },
+    { fuente: 'Registros de la atención · Ficha de caracterización (Forms)', semaforo: 'rojo', falta: '[Simulado] La ficha no registra comuna de residencia', ruta: 'construir', paso: '[Simulado] Agregar comuna a la ficha', cuando: CUANDO[0], uso: '[Simulado] Elegir sedes de jornadas', formato: 'Tablero' },
+    { fuente: 'Datos administrativos · SISBEN', semaforo: 'amarillo', falta: '[Simulado] Acceso por convenio', ruta: 'gestionar', paso: '[Simulado] Solicitud formal a Planeación', cuando: CUANDO[1], uso: '[Simulado] Cruzar vulnerabilidad', formato: 'Informe' },
+    { fuente: 'Registros de la atención · Matriz de atenciones E.A', semaforo: 'verde', uso: '[Simulado] Seguimiento del equipo', formato: 'Ficha o boletín' },
+    { fuente: 'Información secundaria · Reportes de cooperación (GIFMM, R4V, agencias)', semaforo: 'amarillo', falta: '[Simulado] Desagregación por ciudad', ruta: 'fuera', paso: '[Simulado] Dejar como recomendación', cuando: CUANDO[3], uso: '[Simulado] Contexto para escenarios', formato: 'Informe' }];
+  R.forEach(function (q, i) {
+    const x = ej[i];
+    guardarMesa({ mesa: String(i % 3 + 1), filas: [{ id: q.id, fuente: x.fuente, produce: RS[i % 4], frecuencia: 'Mensual', semaforo: x.semaforo, falta: x.falta || '', ruta: x.ruta || '',
+      paso: x.paso || '', responsable: x.ruta ? RS[0] : '', cuando: x.cuando || '', uso: x.uso, frecUso: 'Mensual', formato: x.formato, frecReporte: i % 2 ? 'Trimestral' : 'Mensual',
+      valida: i < 4 ? RS[5 % RS.length] : '', publica: i < 3 ? RS[0] : '', recibe: q.destinos, notas: '' }] });
+  });
+  return { ok: true };
+}
+function borrarSimulacion(r) {
+  validarClave_(r);
+  conLock_(function () {
+    const quitar = function (nombre, col, prueba) {
+      const sh = hoja_(nombre), datos = filas_(nombre);
+      for (let i = datos.length - 1; i >= 0; i--) if (prueba(String(datos[i][col]))) sh.deleteRow(i + 2);
+    };
+    quitar('ParaQue', 1, function (v) { return v.indexOf('SIM-') === 0; });
+    quitar('Votos', 1, function (v) { return v.indexOf('SIM-') === 0; });
+    quitar('Preguntas', 1, function (v) { return /^S\d+$/.test(v); });
+    quitar('Matriz', 2, function (v) { return /^S\d+$/.test(v); });
+    if (config_('simulacion') === true) quitar('Config', 0, function (v) { return ['dimensiones', 'actores', 'simulacion'].indexOf(v) >= 0; });
+  });
+  return { ok: true };
+}
+function escribir_(nombre, filas) {
+  if (!filas.length) return;
+  const sh = hoja_(nombre);
+  sh.getRange(sh.getLastRow() + 1, 1, filas.length, HOJAS[nombre].length).setValues(filas);
 }
