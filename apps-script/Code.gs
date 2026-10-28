@@ -71,9 +71,9 @@ function responsables_() {
 const HOJAS = {
   Config: ['Clave', 'Valor'],
   ParaQue: ['Fecha', 'Envío', 'Área', 'Grupo', 'Para qué', 'Ejemplo de decisión'],
-  Preguntas: ['Fecha', 'ID', 'Área', 'Grupo', 'Pregunta', 'Para qué (dimensiones)', 'A quién se reporta', 'Decisión', 'Oculta', 'Frecuencia', 'Qué se mide'],
+  Preguntas: ['Fecha', 'ID', 'Área', 'Grupo', 'Pregunta', 'Para qué (dimensiones)', 'A quién se reporta', 'Decisión', 'Oculta', 'Frecuencia', 'Qué se mide', 'Dispositivo'],
   Votos: ['Fecha', 'Envío', 'Área', 'Grupo', 'ID'],
-  Insumos: ['Fecha', 'Insumo', 'Pregunta', 'Fuente', 'Quién la produce', 'Frecuencia del dato', '¿La tenemos?', 'Comentario', 'Grupo'],
+  Insumos: ['Fecha', 'Insumo', 'Pregunta', 'Fuente', 'Quién la produce', 'Frecuencia del dato', '¿La tenemos?', 'Comentario', 'Grupo', 'Dispositivo'],
   Evaluacion: ['Fecha', 'Pregunta', '¿Es lograble?', 'Horizonte', 'Qué falta', 'Cómo se presenta', 'Responsable']
 };
 function libro_() { return (typeof HOJA_ID !== 'undefined' && HOJA_ID) ? SpreadsheetApp.openById(HOJA_ID) : SpreadsheetApp.getActiveSpreadsheet(); }
@@ -98,6 +98,12 @@ function lista_(arr, validos, max) {
   return (Array.isArray(arr) ? arr : []).map(limpiar_).filter(function (x, i, a) { return x && a.indexOf(x) === i && (!validos || validos.indexOf(x) >= 0); }).slice(0, max || 12);
 }
 function corto_(v) { return limpiar_(v).slice(0, 80); }
+// Identificador anónimo del dispositivo (lo genera la página; no identifica a la persona). Permite editar y evita duplicados.
+function token_(r) { const v = String(r && r.dispositivo || ''); return /^[a-z0-9]{8,24}$/.test(v) ? v : ''; }
+function quitarFilas_(nombre, prueba) {
+  const sh = hoja_(nombre), datos = filas_(nombre);
+  for (let i = datos.length - 1; i >= 0; i--) if (prueba(datos[i])) sh.deleteRow(i + 2);
+}
 function conLock_(fn) { const lock = LockService.getScriptLock(); lock.waitLock(20000); try { return fn(); } finally { lock.releaseLock(); } }
 function grupo_(r) { const n = grupos_(); const g = String(r && r.grupo || ''); return n && Number(g) >= 1 && Number(g) <= n ? g : ''; }
 function validarPersona_(r) {
@@ -174,7 +180,7 @@ function agregarPriorizada(r) {
 function guardarParaQue(r) {
   const p = validarPersona_(r);
   const base = TALLER.dimensiones.map(function (d) { return d.nombre; });
-  const envio = Utilities.getUuid().slice(0, 8), ahora = new Date();
+  const envio = token_(r) || Utilities.getUuid().slice(0, 8), ahora = new Date();
   const filas = [];
   (r.items || []).slice(0, 12).forEach(function (it) {
     const nombre = enLista_(it.nombre, base);
@@ -188,8 +194,9 @@ function guardarParaQue(r) {
   // Actores de la lista a quienes reporta esta persona.
   lista_(r.reporta, nombresDestinos_(), 12).forEach(function (a) { filas.push([ahora, envio, p.area, p.grupo, 'Reporta: ' + a, '']); });
   if (!filas.length) throw new Error('Marque al menos un para qué.');
-  conLock_(function () { escribir_('ParaQue', filas); });
-  return { ok: true };
+  // Si el mismo dispositivo envía de nuevo, su respuesta anterior se reemplaza (no se duplica).
+  conLock_(function () { quitarFilas_('ParaQue', function (f) { return f[1] === envio; }); escribir_('ParaQue', filas); });
+  return { ok: true, reemplazada: !!token_(r) };
 }
 
 /* ---------- Momento 2 · Preguntas y votos ---------- */
@@ -201,10 +208,13 @@ function guardarPregunta(r) {
   if (!dims.length) throw new Error('Marque al menos un para qué.');
   const destinos = lista_(r.destinos, null, 10).map(corto_);
   return conLock_(function () {
-    const max = filas_('Preguntas').reduce(function (m, f) { const n = /^Q(\d+)$/.exec(f[1]); return n ? Math.max(m, Number(n[1])) : m; }, 0);
-    const id = 'Q' + ('00' + (max + 1)).slice(-3);
-    escribir_('Preguntas', [[new Date(), id, p.area, p.grupo, texto, dims.join('; '), destinos.join('; '), limpiar_(r.decision), '', enLista_(r.frecuencia, FRECUENCIAS), corto_(r.mide)]]);
-    return { ok: true, id: id };
+    const tk = token_(r), datos = filas_('Preguntas');
+    // Editar: misma pregunta del mismo dispositivo. Duplicado: mismo texto del mismo dispositivo.
+    let i = tk ? datos.findIndex(function (f) { return f[11] === tk && ((r.id && f[1] === r.id) || String(f[4]).trim().toLowerCase() === texto.toLowerCase()); }) : -1;
+    const id = i >= 0 ? datos[i][1] : 'Q' + ('00' + (datos.reduce(function (m, f) { const n = /^Q(\d+)$/.exec(f[1]); return n ? Math.max(m, Number(n[1])) : m; }, 0) + 1)).slice(-3);
+    const fila = [new Date(), id, p.area, p.grupo, texto, dims.join('; '), destinos.join('; '), limpiar_(r.decision), i >= 0 ? datos[i][8] : '', enLista_(r.frecuencia, FRECUENCIAS), corto_(r.mide), tk];
+    if (i >= 0) hoja_('Preguntas').getRange(i + 2, 1, 1, fila.length).setValues([fila]); else escribir_('Preguntas', [fila]);
+    return { ok: true, id: id, editada: i >= 0 };
   });
 }
 function guardarVotos(r) {
@@ -212,8 +222,8 @@ function guardarVotos(r) {
   const visibles = preguntas_().filter(function (q) { return !q.oculta; }).map(function (q) { return q.id; });
   const ids = lista_(r.ids, visibles, MAX_VOTOS);
   if (!ids.length) throw new Error('Marque al menos una estrella.');
-  const envio = Utilities.getUuid().slice(0, 8), ahora = new Date();
-  conLock_(function () { escribir_('Votos', ids.map(function (id) { return [ahora, envio, p.area, p.grupo, id]; })); });
+  const envio = token_(r) || Utilities.getUuid().slice(0, 8), ahora = new Date();
+  conLock_(function () { quitarFilas_('Votos', function (f) { return f[1] === envio; }); escribir_('Votos', ids.map(function (id) { return [ahora, envio, p.area, p.grupo, id]; })); });
   return { ok: true, votos: ids.length };
 }
 function ocultarPregunta(r) {
@@ -238,11 +248,16 @@ function guardarInsumo(r) {
   if (!preguntas_().some(function (q) { return q.id === qid; })) throw new Error('Pregunta no encontrada.');
   const fuente = limpiar_(r.fuente).slice(0, 200);
   if (!fuente) throw new Error('Indique la fuente.');
-  const id = 'I' + Utilities.getUuid().slice(0, 6);
-  conLock_(function () {
-    escribir_('Insumos', [[new Date(), id, qid, fuente, corto_(r.produce), enLista_(r.frecuencia, FRECUENCIAS), enLista_(r.tenemos, TENEMOS), limpiar_(r.comentario), grupo_(r)]]);
+  const tk = token_(r);
+  return conLock_(function () {
+    const datos = filas_('Insumos');
+    // Editar por ID; o, si el mismo dispositivo repite la misma fuente en la misma pregunta, se actualiza en vez de duplicar.
+    const i = datos.findIndex(function (f) { return (r.id && f[1] === r.id) || (tk && f[9] === tk && f[2] === qid && f[3] === fuente); });
+    const id = i >= 0 ? datos[i][1] : 'I' + Utilities.getUuid().slice(0, 6);
+    const fila = [new Date(), id, qid, fuente, corto_(r.produce), enLista_(r.frecuencia, FRECUENCIAS), enLista_(r.tenemos, TENEMOS), limpiar_(r.comentario), grupo_(r), i >= 0 && !tk ? datos[i][9] : tk];
+    if (i >= 0) hoja_('Insumos').getRange(i + 2, 1, 1, fila.length).setValues([fila]); else escribir_('Insumos', [fila]);
+    return { ok: true, id: id, editado: i >= 0 };
   });
-  return { ok: true, id: id };
 }
 function borrarInsumo(r) {
   const id = limpiar_(r && r.id);
@@ -306,7 +321,7 @@ function obtenerResultados() {
   const preguntas = preguntas_().map(function (q) { q.votos = votos[q.id] || 0; return q; });
   const ranking = preguntas.filter(function (q) { return !q.oculta; }).sort(function (a, b) { return (b.votos - a.votos) || (a.id < b.id ? -1 : 1); });
   const insumos = filas_('Insumos').map(function (f) {
-    return { id: f[1], pregunta: f[2], fuente: f[3], produce: f[4], frecuencia: f[5], tenemos: f[6], comentario: f[7], grupo: String(f[8] || '') };
+    return { id: f[1], pregunta: f[2], fuente: f[3], produce: f[4], frecuencia: f[5], tenemos: f[6], comentario: f[7], grupo: String(f[8] || ''), mio: '' };
   });
   return { activas: activas_(), destinos: destinos_(), grupos: grupos_(), actores: ordenar(actores), reporta: ordenar(reporta),
     simulacion: config_('simulacion') === true, paraque: Object.keys(pq).map(function (k) { return pq[k]; }).sort(function (a, b) { return b.votos - a.votos; }),
@@ -340,10 +355,10 @@ function cargarSimulacion(r) {
     return [ahora, 'S' + ('0' + (i + 1)).slice(-2), areas[i % areas.length], '', '[Simulado] ' + x.texto,
       x.dims.map(function (id) { return TALLER.dimensiones.filter(function (d) { return d.id === id; })[0].nombre; }).join('; '),
       [dest[(i * 3 + 2) % dest.length], dest[(i * 5 + 1) % dest.length]].filter(function (v, k, a) { return a.indexOf(v) === k; }).join('; '),
-      i % 3 === 0 ? '[Simulado] Ajustar la oferta del trimestre' : '', '', frec[i % frec.length], i === 0 ? '[Simulado] ' + mide[0] : ''];
+      i % 3 === 0 ? '[Simulado] Ajustar la oferta del trimestre' : '', '', frec[i % frec.length], i === 0 ? '[Simulado] ' + mide[0] : '', ''];
   });
-  preg.push([ahora, 'S11', areas[1], '', '[Simulado] ¿Cuántas personas atendidas cada mes son de primera vez?', N[0] + '; ' + N[2], dest[2], '[Simulado] Planear cupos del mes', '', 'Mensual', '[Simulado] Personas nuevas por mes']);
-  preg.push([ahora, 'S12', areas[3], '', '[Simulado] ¿Cuántas personas atendemos al mes?', N[0], dest[2], '', 'Sí', 'Mensual', '']);
+  preg.push([ahora, 'S11', areas[1], '', '[Simulado] ¿Cuántas personas atendidas cada mes son de primera vez?', N[0] + '; ' + N[2], dest[2], '[Simulado] Planear cupos del mes', '', 'Mensual', '[Simulado] Personas nuevas por mes', '']);
+  preg.push([ahora, 'S12', areas[3], '', '[Simulado] ¿Cuántas personas atendemos al mes?', N[0], dest[2], '', 'Sí', 'Mensual', '', '']);
   const pesos = [9, 3, 6, 4, 8, 7, 5, 2, 6, 1, 4, 0];
   const votos = [];
   for (let v = 0; v < 14; v++) {
@@ -376,7 +391,7 @@ function cargarSimulacion(r) {
     ['No por ahora', 'Para más adelante', '[Simulado] Agregar la pregunta a la ficha de caracterización', '', '']];
   const filasIns = [], filasEv = [];
   R.forEach(function (q, i) {
-    ins[i].forEach(function (x, j) { filasIns.push([ahora, 'SI' + i + j, q.id, x[0], x[1], x[2], x[3], x[4], '']); });
+    ins[i].forEach(function (x, j) { filasIns.push([ahora, 'SI' + i + j, q.id, x[0], x[1], x[2], x[3], x[4], '', '']); });
     filasEv.push([ahora, q.id].concat(evs[i]));
   });
   conLock_(function () { escribir_('Insumos', filasIns); escribir_('Evaluacion', filasEv); });
