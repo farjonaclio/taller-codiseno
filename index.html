@@ -210,6 +210,9 @@
   .fin { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
   .fin div { background: var(--azul); color: #fff; border-radius: 12px; padding: 12px 14px; font-size: 16px; } .fin small { display: block; color: #C9D3DC; font-size: 13px; margin-top: 4px; }
   .tabs.claro button { background: rgba(255,255,255,.12); }
+  .logos { gap: 12px; } .logos img.clio { height: 40px; margin-right: auto; } .logos img { max-width: 34%; }
+  @media (max-width: 480px) { .logos { padding: 8px 12px; } .logos img { height: 34px; } .logos img.clio { height: 30px; } }
+  .act-res { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; } .act-res small { color: #D7E6EA; font-size: 13px; }
   @media (max-width: 900px) { .barra-pq { grid-template-columns: 1fr 50px; } .barra-pq .b { grid-column: 1 / -1; grid-row: 2; } .insumo { grid-template-columns: 1fr auto; } .insumo .badge { grid-column: 1 / -1; justify-self: start; } }
   @media print { .res-cab .tabs, #bFac, .fac, .logos { display: none !important; } body.res { background: #fff; } }
 </style>
@@ -281,7 +284,7 @@
     s.innerHTML = ICONOS[nombre] || ''; return s;
   }
   function barraLogos(conClio) {
-    return el('div', { class: 'logos' }, [conClio ? el('img', { src: LOGO_CLIO, alt: 'CliO Consulting', class: 'clio' }) : null,
+    return el('div', { class: 'logos' }, [el('img', { src: LOGO_CLIO, alt: 'CliO Consulting', class: 'clio' }),
       el('img', { src: LOGO_MERA, alt: 'Mujeres Echando Raíces' }), el('img', { src: LOGO_EF, alt: 'France, AFD y Expertise France' })]);
   }
   function aviso() { return MODO === 'demo' ? el('div', { class: 'aviso', text: 'Vista previa con datos de ejemplo: aquí nada se guarda en la hoja.' }) : null; }
@@ -335,6 +338,7 @@
   function destinos() { return CFG.destinos.map(d => d.id); }
   const TEN = { 'Sí': 'si', 'Parcial': 'parcial', 'No': 'no' };
   const badge = t => el('span', { class: 'badge ' + (TEN[t] || ''), text: t ? (t === 'No sé' ? '❔ No sé' : t === 'Sí' ? '🟢 Sí' : t === 'Parcial' ? '🟡 Parcial' : '🔴 No') : '—' });
+  const hora = () => new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
   function datalistResp() { return el('datalist', { id: 'dl-resp' }, CFG.responsables.map(r => el('option', { value: r }))); }
   function urlVista(v) { const u = new URL(location.href); if (v) u.searchParams.set('vista', v); else u.searchParams.delete('vista'); u.hash = ''; return u.toString(); }
   function enlaceCorto() { return (location.host + location.pathname).replace(/\/$/, '').replace(/index\.html$/, ''); }
@@ -344,7 +348,7 @@
   const CLAVE = 'taller-v6';
   function participante(inicial) {
     let st = leer(CLAVE) || {};
-    st = Object.assign({ area: '', grupo: '', pq: {}, otro: { nombre: '', ejemplo: '' }, actores: '', pqEnviado: false, mias: [], votos: [], votado: false,
+    st = Object.assign({ area: '', grupo: '', pq: {}, otro: { nombre: '', ejemplo: '' }, actores: '', reporta: [], pqEnviado: false, mias: [], votos: [], votado: false,
       borrador: { texto: '', mide: '', frecuencia: '', dims: [], destinos: [], otroActor: '', decision: '' } }, st);
     const guardar = () => guardarLocal(CLAVE, st);
     const main = el('main');
@@ -421,15 +425,15 @@
       const act = el('input', { type: 'text', id: 'actores', maxlength: '300', placeholder: 'Ej.: Personería, ICBF (separe con comas)' }); act.value = st.actores || '';
       act.addEventListener('input', () => { st.actores = act.value; guardar(); });
       kids.push(el('div', { class: 'tarjeta' }, [el('h2', { text: '📣 ¿A quién se le reporta esta información?' }),
-        el('p', { class: 'nota-p', text: 'Lista propuesta de actores. ¿Falta alguno? En el momento 2 cada pregunta dirá a cuáles va.' }),
-        el('div', { class: 'chips' }, destinos().map(x => el('span', { class: 'tog', text: x }))),
+        el('p', { class: 'nota-p', text: 'Toque los actores a quienes su área reporta (puede marcar varios). ¿Falta alguno? Escríbalo abajo. En el momento 2 cada pregunta dirá a cuáles va.' }),
+        multiple(destinos(), st.reporta = (st.reporta || []).filter(x => destinos().indexOf(x) >= 0), guardar),
         campo('Actor que falta (opcional)', act)]));
       accion.textContent = st.pqEnviado ? 'Enviar de nuevo' : 'Enviar';
       accion.onclick = () => {
         const items = Object.keys(st.pq).map(k => ({ nombre: k, ejemplo: st.pq[k].ejemplo || '' }));
-        if (!items.length && !(o.nombre || '').trim() && !(st.actores || '').trim()) { err.textContent = 'Marque al menos un para qué.'; return; }
+        if (!items.length && !(o.nombre || '').trim() && !(st.actores || '').trim() && !st.reporta.length) { err.textContent = 'Marque al menos un para qué.'; return; }
         accion.disabled = true; accion.textContent = 'Enviando…';
-        llamar('guardarParaQue', { area: st.area, grupo: st.grupo, items: items, otro: o.nombre || '', otroEjemplo: o.ejemplo || '', actores: st.actores || '' }, () => { st.pqEnviado = true; guardar(); gracias('Gracias. Veamos juntos los resultados en la pantalla.'); }, falla);
+        llamar('guardarParaQue', { area: st.area, grupo: st.grupo, items: items, otro: o.nombre || '', otroEjemplo: o.ejemplo || '', actores: st.actores || '', reporta: st.reporta }, () => { st.pqEnviado = true; guardar(); gracias('Gracias. Veamos juntos los resultados en la pantalla.'); }, falla);
       };
     }
 
@@ -601,16 +605,17 @@
       // Conclusión
       const ev = () => (datos && datos.evaluacion && datos.evaluacion[q.id]) || {};
       const est = el('div', { class: 'ok-txt' });
-      const guardarEv = (k, v) => { est.textContent = 'Guardando…'; llamar('guardarEvaluacion', { pregunta: q.id, [k]: v }, r => { if (datos) datos.evaluacion[q.id] = r.evaluacion; est.textContent = '✅ Guardado'; }, e => { est.textContent = '⚠️ ' + e.message; }); };
+      const guardarEv = (k, v) => { est.textContent = 'Guardando…'; llamar('guardarEvaluacion', { pregunta: q.id, [k]: v }, r => { if (datos) datos.evaluacion[q.id] = r.evaluacion; est.textContent = '✅ Guardado ' + hora() + ' · puede editar y volver a guardar'; }, e => { est.textContent = '⚠️ ' + e.message; }); };
       const log = unica(CFG.lograble.map(t => [t, t === 'Sí' ? '✅ Sí' : t === 'Con ajustes' ? '🛠️ Con ajustes' : '⏸️ No por ahora']), ev().lograble, v => guardarEv('lograble', v), '¿Es lograble?');
       const hor = unica(CFG.horizonte.map(t => [t, t === 'Prioritaria' ? '🚀 Prioritaria' : '🗓️ Para más adelante']), ev().horizonte, v => guardarEv('horizonte', v), 'Horizonte');
       const falta = el('input', { type: 'text', id: 'fa-' + q.id, maxlength: '300', placeholder: 'Ej.: acordar el retorno de información con Salud' }); falta.value = ev().falta || '';
-      falta.addEventListener('input', () => falta.setAttribute('data-sucio', '1'));
-      falta.addEventListener('change', () => { falta.removeAttribute('data-sucio'); guardarEv('falta', falta.value); });
+      const bFalta = el('button', { type: 'button', class: 'btn-mini', text: 'Guardar' });
+      falta.addEventListener('input', () => { falta.setAttribute('data-sucio', '1'); est.textContent = 'Sin guardar'; });
+      bFalta.addEventListener('click', () => { falta.removeAttribute('data-sucio'); guardarEv('falta', falta.value); });
       refrescos.push(D => { const v = D.evaluacion[q.id] || {}; log.fijar(v.lograble || ''); hor.fijar(v.horizonte || ''); if (document.activeElement !== falta && !falta.getAttribute('data-sucio')) falta.value = v.falta || ''; });
       return el('div', { class: 'tarjeta' }, cabPreg(q, pos, d).concat([
         el('h2', { text: '🧩 Insumos para responderla' }), lista, bAbrir, form, ok,
-        el('div', { class: 'concl' }, [el('div', { class: 'sub-t', text: '¿Es lograble?' }), log, el('div', { class: 'sub-t', text: '¿Es prioritaria o para más adelante?' }), hor, campo('Si falta algo, ¿qué?', falta), est])]));
+        el('div', { class: 'concl' }, [el('div', { class: 'sub-t', text: '¿Es lograble?' }), log, el('div', { class: 'sub-t', text: '¿Es prioritaria o para más adelante?' }), hor, campo('Si falta algo, ¿qué?', falta), el('div', { class: 'fila', style: 'align-items:center' }, [bFalta, est])])]));
     }
 
     function pintarComoSe(kids) {
@@ -621,13 +626,17 @@
         if (!qs.length) return [el('div', { class: 'consejo', text: 'Aún no hay preguntas priorizadas.' })];
         return qs.map((q, i) => {
           const v = (d.evaluacion || {})[q.id] || {};
-          const est = el('div', { class: 'ok-txt' });
-          const guardarEv = (k, val) => { est.textContent = 'Guardando…'; llamar('guardarEvaluacion', { pregunta: q.id, [k]: val }, () => { est.textContent = '✅ Guardado'; }, e => { est.textContent = '⚠️ ' + e.message; }); };
+          const est = el('div', { class: 'ok-txt', text: v.presenta || v.responsable ? 'Guardado · puede editar y volver a guardar' : '' });
           const pres = el('textarea', { id: 'pre-' + q.id, maxlength: '500', placeholder: 'Ej.: una cifra grande con la tendencia de los últimos 6 meses y un mapa por comuna; se envía en un boletín de una página' }); pres.value = v.presenta || '';
           const resp = el('input', { type: 'text', id: 'res-' + q.id, maxlength: '80', list: 'dl-resp', placeholder: 'Área o entidad responsable' }); resp.value = v.responsable || '';
-          [[pres, 'presenta'], [resp, 'responsable']].forEach(([c, k]) => { c.addEventListener('input', () => c.setAttribute('data-sucio', '1')); c.addEventListener('change', () => { c.removeAttribute('data-sucio'); guardarEv(k, c.value); }); });
+          const bG = el('button', { type: 'button', class: 'btn prim enviar', style: 'flex:none;align-self:flex-start', text: 'Guardar' });
+          const marcar = c => c.addEventListener('input', () => { c.setAttribute('data-sucio', '1'); est.textContent = 'Sin guardar'; bG.disabled = false; });
+          marcar(pres); marcar(resp);
+          bG.addEventListener('click', () => { bG.disabled = true; est.textContent = 'Guardando…';
+            llamar('guardarEvaluacion', { pregunta: q.id, presenta: pres.value, responsable: resp.value }, () => { pres.removeAttribute('data-sucio'); resp.removeAttribute('data-sucio'); bG.disabled = false; est.textContent = '✅ Guardado ' + hora() + ' · puede editar y volver a guardar'; },
+              e => { bG.disabled = false; est.textContent = '⚠️ No se guardó: ' + e.message; }); });
           refrescos.push(D => { const w = (D.evaluacion || {})[q.id] || {}; [[pres, 'presenta'], [resp, 'responsable']].forEach(([c, k]) => { if (document.activeElement !== c && !c.getAttribute('data-sucio')) c.value = w[k] || ''; }); });
-          return el('div', { class: 'tarjeta' }, cabPreg(q, i + 1, d).concat([campo('🖼️ ¿Cómo se presenta la respuesta?', pres), campo('👤 Responsable', resp), est]));
+          return el('div', { class: 'tarjeta' }, cabPreg(q, i + 1, d).concat([campo('🖼️ ¿Cómo se presenta la respuesta?', pres), campo('👤 Responsable', resp), el('div', { class: 'fila', style: 'align-items:center' }, [bG, est])]));
         });
       }));
     }
@@ -649,11 +658,14 @@
     const tabs = el('div', { class: 'tabs', role: 'tablist' });
     const titulo = el('h1');
     const bFac = el('button', { type: 'button', class: 'btn-mini', id: 'bFac', text: '⚙️ Modo facilitador' });
+    const bAct = el('button', { type: 'button', class: 'btn-mini', id: 'bAct', text: '↻ Actualizar' });
+    const actualizado = el('small');
+    bAct.addEventListener('click', () => { actualizado.textContent = 'Actualizando…'; cargar(true); });
     const cuerpo = el('div');
     const msg = el('div', { class: 'error', role: 'alert', style: 'max-width:1440px;margin:12px auto 0' });
     app.replaceChildren(...[aviso(), barraLogos(true),
       el('div', { class: 'res-cab' }, [el('div', {}, [el('div', { class: 'eyebrow', text: 'Resultados en vivo' }), titulo, el('div', { class: 'enlace' }, ['Participe en ', el('b', { text: enlaceCorto() })]), tabs]),
-        el('div', { style: 'display:flex;flex-direction:column;align-items:flex-end;gap:10px' }, [contador, bFac])]),
+        el('div', { style: 'display:flex;flex-direction:column;align-items:flex-end;gap:10px' }, [contador, el('div', { class: 'act-res' }, [actualizado, bAct, bFac])])]),
       msg, cuerpo].filter(Boolean));
     bFac.addEventListener('click', () => { if (!fac && MODO !== 'demo' && !CLAVE_FAC) { const c = window.prompt('Clave del facilitador'); if (!c) return; CLAVE_FAC = c.trim(); } fac = !fac; bFac.textContent = fac ? '✔ Salir del modo facilitador' : '⚙️ Modo facilitador'; if (ultimo) pintar(ultimo); });
     const TABS = [['1', '1 · Para qué'], ['2', '2 · Preguntas'], ['3', '3 · Qué tenemos'], ['4', '4 · Cómo se ve'], ['5', '📋 Marco lógico']];
@@ -713,7 +725,8 @@
         const dest = (d.destinos || CFG.destinos).map(x => x.id);
         const sugeridos = (d.actores || []).filter(a => dest.indexOf(a.nombre) < 0);
         if (!selActores) selActores = (d.destinos || CFG.destinos).filter(x => x.marco === 'Agregado en el taller').map(x => x.id);
-        const bloque = [el('h2', { text: '📣 Actores a quienes se reporta · ' + dest.length }), el('div', { class: 'chips' }, dest.map(n => el('span', { class: 'tog', 'aria-pressed': 'true', text: n })))];
+        const rep = {}; (d.reporta || []).forEach(a => rep[a.nombre] = a.votos);
+        const bloque = [el('h2', { text: '📣 A quién se reporta · cuántas personas marcaron cada actor' }), el('div', { class: 'chips' }, dest.slice().sort((x, y) => (rep[y] || 0) - (rep[x] || 0)).map(n => el('span', { class: 'tog', 'aria-pressed': rep[n] ? 'true' : 'false', text: n + ' · ' + (rep[n] || 0) })))];
         if (sugeridos.length) bloque.push(el('p', { class: 'nota-p', text: 'Actores nuevos mencionados:' }), el('div', { class: 'chips' }, sugeridos.map(a => {
           const b = el('button', { type: 'button', class: 'tog', 'aria-pressed': selActores.indexOf(a.nombre) >= 0 ? 'true' : 'false', text: a.nombre + ' (' + a.votos + ')' });
           if (fac) b.addEventListener('click', () => { const i = selActores.indexOf(a.nombre); if (i >= 0) selActores.splice(i, 1); else selActores.push(a.nombre); pintar(ultimo); });
@@ -801,7 +814,7 @@
       }
       cuerpo.replaceChildren(wrap);
     }
-    const cargar = () => llamar('obtenerResultados', undefined, d => { if (!(fac && document.activeElement && ['dim-nueva', 'actor-nuevo'].indexOf(document.activeElement.id) >= 0)) pintar(d); else ultimo = d; });
+    const cargar = forzar => llamar('obtenerResultados', undefined, d => { actualizado.textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-CO'); if (forzar === true || !(fac && document.activeElement && ['dim-nueva', 'actor-nuevo'].indexOf(document.activeElement.id) >= 0)) pintar(d); else ultimo = d; }, e => { actualizado.textContent = '⚠️ Sin conexión'; });
     pintarTabs(); cargar(); setInterval(cargar, 8000);
   }
 
