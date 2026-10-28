@@ -350,14 +350,16 @@
     let st = leer(CLAVE) || {};
     st = Object.assign({ area: '', grupo: '', pq: {}, otro: { nombre: '', ejemplo: '' }, actores: '', reporta: [], pqEnviado: false, mias: [], votos: [], votado: false,
       borrador: { texto: '', mide: '', frecuencia: '', dims: [], destinos: [], otroActor: '', decision: '' } }, st);
+    if (!/^[a-z0-9]{8,24}$/.test(st.dispositivo || '')) st.dispositivo = (Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)).replace(/[^a-z0-9]/g, '').slice(0, 16).padEnd(10, 'x');
     const guardar = () => guardarLocal(CLAVE, st);
+    guardar();
     const main = el('main');
     const err = el('div', { class: 'error', role: 'alert' });
     const atras = el('button', { type: 'button', class: 'btn sec', text: '← Inicio' });
     const accion = el('button', { type: 'button', class: 'btn prim enviar' });
     const nav = el('div', { class: 'nav' }, [el('div', { class: 'dentro' }, [atras, accion])]);
     app.replaceChildren(...[aviso(), barraLogos(false), main, nav, datalistResp()].filter(Boolean));
-    let vista = inicial || 'inicio', datos = null, reloj = null, refrescos = [];
+    let vista = inicial || 'inicio', datos = null, reloj = null, refrescos = [], avisoOk = '';
     atras.addEventListener('click', () => ir('inicio'));
     function ir(v) { vista = v; err.textContent = ''; pintar(); window.scrollTo(0, 0); }
     function falla(e) { err.textContent = 'No se pudo enviar: ' + (e && e.message ? e.message : 'revise la conexión') + '. Lo escrito sigue guardado en este equipo.'; accion.disabled = false; accion.textContent = 'Reintentar'; }
@@ -428,12 +430,13 @@
         el('p', { class: 'nota-p', text: 'Toque los actores a quienes su área reporta (puede marcar varios). ¿Falta alguno? Escríbalo abajo. En el momento 2 cada pregunta dirá a cuáles va.' }),
         multiple(destinos(), st.reporta = (st.reporta || []).filter(x => destinos().indexOf(x) >= 0), guardar),
         campo('Actor que falta (opcional)', act)]));
-      accion.textContent = st.pqEnviado ? 'Enviar de nuevo' : 'Enviar';
+      if (st.pqEnviado) kids.splice(1, 0, el('div', { class: 'consejo', text: '✅ Ya envió su respuesta. Si cambia algo y toca “Actualizar mi respuesta”, se reemplaza la anterior: no se duplica.' }));
+      accion.textContent = st.pqEnviado ? 'Actualizar mi respuesta' : 'Enviar';
       accion.onclick = () => {
         const items = Object.keys(st.pq).map(k => ({ nombre: k, ejemplo: st.pq[k].ejemplo || '' }));
         if (!items.length && !(o.nombre || '').trim() && !(st.actores || '').trim() && !st.reporta.length) { err.textContent = 'Marque al menos un para qué.'; return; }
         accion.disabled = true; accion.textContent = 'Enviando…';
-        llamar('guardarParaQue', { area: st.area, grupo: st.grupo, items: items, otro: o.nombre || '', otroEjemplo: o.ejemplo || '', actores: st.actores || '', reporta: st.reporta }, () => { st.pqEnviado = true; guardar(); gracias('Gracias. Veamos juntos los resultados en la pantalla.'); }, falla);
+        llamar('guardarParaQue', { dispositivo: st.dispositivo, area: st.area, grupo: st.grupo, items: items, otro: o.nombre || '', otroEjemplo: o.ejemplo || '', actores: st.actores || '', reporta: st.reporta }, () => { st.pqEnviado = true; guardar(); gracias('Gracias, su respuesta quedó guardada. Si quiere cambiarla, vuelva a “1 Para qué”: se actualiza, no se duplica.'); }, falla);
       };
     }
 
@@ -461,7 +464,9 @@
       ]));
       if (!datos) traer(() => pintarAct());
       if (st.mias.length) kids.push(el('div', { class: 'tarjeta' }, [el('h2', { text: '✅ Sus preguntas enviadas (' + st.mias.length + ')' }),
-        el('div', { class: 'mias' }, st.mias.map(m => el('div', { class: 'mia' }, [m.texto, el('small', { text: [m.frecuencia, (m.dims || []).join(' · '), (m.destinos || []).length ? '→ ' + m.destinos.join(', ') : ''].filter(Boolean).join(' · ') })])))]));
+        el('p', { class: 'nota-p', text: 'Toque “Editar” para corregir una pregunta: se actualiza, no se duplica.' }),
+        el('div', { class: 'mias' }, st.mias.map(m => el('div', { class: 'mia' }, [el('b', { text: (m.id ? m.id + ' · ' : '') }), m.texto, el('small', { text: [m.frecuencia, (m.dims || []).join(' · '), (m.destinos || []).length ? '→ ' + m.destinos.join(', ') : ''].filter(Boolean).join(' · ') }),
+          el('button', { type: 'button', class: 'btn-link', text: '✏️ Editar', onclick: () => { const lista = destinos(); st.borrador = { id: m.id, texto: m.texto, mide: m.mide || '', frecuencia: m.frecuencia || '', dims: (m.dims || []).slice(), destinos: (m.destinos || []).filter(x => lista.indexOf(x) >= 0), otroActor: (m.destinos || []).filter(x => lista.indexOf(x) < 0).join(', '), decision: m.decision || '' }; guardar(); pintar(); window.scrollTo(0, 0); } })])))]));
       // Ideas para empezar, solo de los para qué acordados.
       const ej = CFG.ejemplos.filter(x => x.dims.map(nombreDim).some(n => activas().indexOf(n) >= 0));
       const ideas = el('div', { class: 'tarjeta' }, [el('h2', { text: '💡 Ideas para empezar' }), el('p', { class: 'nota-p', text: (CFG.activas ? 'Solo de los para qué acordados. ' : '') + 'Toque “Usar” para copiarla y cámbiela si quiere.' })]);
@@ -472,14 +477,18 @@
         ideas.appendChild(el('div', { class: 'idea' }, [x.texto, el('small', { text: nombres.join(' · ') + ' · Dato: ' + x.dato }), usar]));
       });
       if (ej.length) kids.push(ideas);
-      accion.textContent = 'Enviar pregunta';
+      if (avisoOk) { kids.splice(1, 0, el('div', { class: 'consejo', text: avisoOk })); avisoOk = ''; }
+      if (b.id) kids.splice(1, 0, el('div', { class: 'consejo' }, [el('b', { text: '✏️ Está editando su pregunta ' + b.id + '. ' }), 'Al guardar se reemplaza. ', el('button', { type: 'button', class: 'btn-link', text: 'Cancelar edición', onclick: () => { st.borrador = { texto: '', mide: '', frecuencia: '', dims: [], destinos: [], otroActor: '', decision: '' }; guardar(); pintar(); } })]));
+      accion.textContent = b.id ? 'Guardar cambios' : 'Enviar pregunta';
       accion.onclick = () => {
         if (b.texto.trim().length < 10) { err.textContent = 'Escriba la pregunta.'; return; }
         if (!b.dims.length) { err.textContent = 'Marque a qué para qué responde.'; return; }
         const dest = b.destinos.concat((b.otroActor || '').split(/[;,]/).map(x => x.trim()).filter(Boolean));
         accion.disabled = true; accion.textContent = 'Enviando…';
-        llamar('guardarPregunta', { area: st.area, grupo: st.grupo, texto: b.texto, mide: b.mide, frecuencia: b.frecuencia, dims: b.dims, destinos: dest, decision: b.decision }, r => {
-          st.mias.unshift({ id: r.id, texto: b.texto, frecuencia: b.frecuencia, dims: b.dims.slice(), destinos: dest });
+        llamar('guardarPregunta', { dispositivo: st.dispositivo, id: b.id || '', area: st.area, grupo: st.grupo, texto: b.texto, mide: b.mide, frecuencia: b.frecuencia, dims: b.dims, destinos: dest, decision: b.decision }, r => {
+          const nueva = { id: r.id, texto: b.texto, mide: b.mide, frecuencia: b.frecuencia, dims: b.dims.slice(), destinos: dest, decision: b.decision };
+          const k = st.mias.findIndex(m => m.id === r.id); if (k >= 0) st.mias[k] = nueva; else st.mias.unshift(nueva);
+          avisoOk = r.editada ? '✅ Pregunta ' + r.id + ' actualizada.' : '✅ Pregunta ' + r.id + ' enviada. Puede escribir otra.';
           st.borrador = { texto: '', mide: '', frecuencia: '', dims: [], destinos: [], otroActor: '', decision: '' }; guardar(); pintar(); window.scrollTo(0, 0);
         }, falla);
       };
@@ -513,11 +522,11 @@
         });
         lista.replaceChildren(...(items.length ? items : [el('div', { class: 'tarjeta', text: 'Aún no hay preguntas.' })]));
       });
-      accion.textContent = st.votado ? 'Votar de nuevo' : 'Enviar votos';
+      accion.textContent = st.votado ? 'Actualizar mis votos' : 'Enviar votos';
       accion.onclick = () => {
         if (!st.votos.length) { err.textContent = 'Marque al menos una estrella.'; return; }
         accion.disabled = true; accion.textContent = 'Enviando…';
-        llamar('guardarVotos', { area: st.area, grupo: st.grupo, ids: st.votos }, () => { st.votado = true; guardar(); gracias('Votos enviados. Los resultados aparecen en la pantalla.'); }, falla);
+        llamar('guardarVotos', { dispositivo: st.dispositivo, area: st.area, grupo: st.grupo, ids: st.votos }, () => { st.votado = true; guardar(); gracias('Votos guardados. Si cambia de opinión, vuelva a “Votar”: sus votos se reemplazan, no se suman.'); }, falla);
       };
     }
 
@@ -567,17 +576,22 @@
       const pintarLista = D => {
         const ins = D.insumos.filter(x => x.pregunta === q.id);
         lista.replaceChildren(...(ins.length ? ins.map(x => {
-          const del = el('button', { type: 'button', class: 'btn-mini', 'aria-label': 'Quitar insumo', text: '🗑️' });
-          del.addEventListener('click', () => { del.disabled = true; llamar('borrarInsumo', { id: x.id }, () => traer(D => D && pintarLista(D)), () => { del.disabled = false; }); });
-          return el('div', { class: 'insumo' }, [badge(x.tenemos), el('div', {}, [el('b', { text: x.fuente }), el('small', { text: [x.produce ? 'Produce: ' + x.produce : '', x.frecuencia ? 'Dato ' + x.frecuencia.toLowerCase() : ''].filter(Boolean).join(' · ') }), x.comentario ? el('div', { class: 'com', text: '💬 ' + x.comentario }) : null]), del]);
+          const del = el('button', { type: 'button', class: 'btn-mini', 'aria-label': 'Quitar insumo', text: '🗑️ Quitar' });
+          let armado = false;
+          del.addEventListener('click', () => {
+            if (!armado) { armado = true; del.textContent = '¿Seguro? Toque otra vez'; del.classList.add('on'); setTimeout(() => { armado = false; del.textContent = '🗑️ Quitar'; del.classList.remove('on'); }, 4000); return; }
+            del.disabled = true; llamar('borrarInsumo', { id: x.id }, () => traer(D => D && pintarLista(D)), () => { del.disabled = false; }); });
+          const ed = el('button', { type: 'button', class: 'btn-mini', text: '✏️ Editar' });
+          ed.addEventListener('click', () => abrirForm(x));
+          return el('div', { class: 'insumo' }, [badge(x.tenemos), el('div', {}, [el('b', { text: x.fuente }), el('small', { text: [x.produce ? 'Produce: ' + x.produce : '', x.frecuencia ? 'Dato ' + x.frecuencia.toLowerCase() : ''].filter(Boolean).join(' · ') }), x.comentario ? el('div', { class: 'com', text: '💬 ' + x.comentario }) : null]), el('div', { style: 'display:flex;flex-direction:column;gap:6px' }, [ed, del])]);
         }) : [el('p', { class: 'nota-p', text: 'Sin insumos todavía.' })]));
       };
       pintarLista(d); refrescos.push(pintarLista);
       // Formulario de un insumo
-      const f = { fuente: '', otra: '', produce: '', frecuencia: '', tenemos: '', comentario: '' };
+      const f = { id: '', fuente: '', otra: '', produce: '', frecuencia: '', tenemos: '', comentario: '' };
       const form = el('div', { class: 'form-ins' }); form.hidden = true;
       const bAbrir = el('button', { type: 'button', class: 'btn sec', style: 'flex:none;align-self:flex-start', text: '+ Agregar insumo' });
-      bAbrir.addEventListener('click', () => { form.hidden = false; bAbrir.hidden = true; form.setAttribute('data-sucio', '1'); });
+      bAbrir.addEventListener('click', () => abrirForm(null));
       const otra = el('input', { type: 'text', id: 'fo-' + q.id, maxlength: '200', placeholder: '¿Cuál?' }); otra.addEventListener('input', () => { f.otra = otra.value; });
       const lOtra = campo('Nombre de la fuente', otra); lOtra.hidden = true;
       const prod = el('input', { type: 'text', id: 'pr-' + q.id, maxlength: '80', list: 'dl-resp', placeholder: 'Área o entidad' }); prod.addEventListener('input', () => { f.produce = prod.value; });
@@ -592,15 +606,25 @@
         const fuente = f.fuente === 'Otra' ? 'Otra: ' + f.otra.trim() : f.fuente;
         if (!f.fuente || fuente === 'Otra: ') { ok.textContent = 'Indique la fuente.'; return; }
         bAdd.disabled = true; ok.textContent = 'Guardando…';
-        llamar('guardarInsumo', { pregunta: q.id, fuente: fuente, produce: f.produce, frecuencia: f.frecuencia, tenemos: f.tenemos, comentario: f.comentario, grupo: st.grupo }, () => {
-          bAdd.disabled = false; ok.textContent = '✅ Insumo agregado. Puede agregar otro.';
-          Object.assign(f, { fuente: '', otra: '', produce: '', frecuencia: '', tenemos: '', comentario: '' });
+        bCancel.disabled = true;
+        llamar('guardarInsumo', { dispositivo: st.dispositivo, id: f.id, pregunta: q.id, fuente: fuente, produce: f.produce, frecuencia: f.frecuencia, tenemos: f.tenemos, comentario: f.comentario, grupo: st.grupo }, r => {
+          bAdd.disabled = false; bCancel.disabled = false; ok.textContent = r.editado ? '✅ Insumo actualizado.' : '✅ Insumo agregado. Puede agregar otro.';
+          Object.assign(f, { id: '', fuente: '', otra: '', produce: '', frecuencia: '', tenemos: '', comentario: '' });
           selF.value = ''; selFr.value = ''; otra.value = ''; prod.value = ''; com.value = ''; ten.fijar(''); lOtra.hidden = true; cerrar(); traer(D => D && pintarLista(D));
-        }, e => { bAdd.disabled = false; ok.textContent = '⚠️ ' + e.message; });
+        }, e => { bAdd.disabled = false; bCancel.disabled = false; ok.textContent = '⚠️ No se guardó: ' + e.message + '. Toque “Guardar insumo” otra vez.'; });
       });
       const selF = selectorFuentes('fu-' + q.id, '', v => { f.fuente = v; lOtra.hidden = v !== 'Otra'; });
       const selFr = selector('fr-' + q.id, CFG.frecuencias, '', v => { f.frecuencia = v; });
-      form.append(el('div', { class: 'campos' }, [campo('Fuente', selF), lOtra, campo('Quién la produce', prod), campo('Cada cuánto se actualiza el dato', selFr)]),
+      const titForm = el('div', { class: 'sub-t' });
+      function abrirForm(x) {
+        const enLista = x && CFG.fuentes.indexOf(x.fuente) >= 0;
+        Object.assign(f, x ? { id: x.id, fuente: enLista ? x.fuente : 'Otra', otra: enLista ? '' : String(x.fuente || '').replace(/^Otra: /, ''), produce: x.produce || '', frecuencia: x.frecuencia || '', tenemos: x.tenemos || '', comentario: x.comentario || '' }
+          : { id: '', fuente: '', otra: '', produce: '', frecuencia: '', tenemos: '', comentario: '' });
+        selF.value = f.fuente; otra.value = f.otra; lOtra.hidden = f.fuente !== 'Otra'; prod.value = f.produce; selFr.value = f.frecuencia; com.value = f.comentario; ten.fijar(f.tenemos);
+        titForm.textContent = x ? '✏️ Editando este insumo' : '➕ Nuevo insumo'; bAdd.textContent = x ? 'Guardar cambios' : 'Guardar insumo'; ok.textContent = '';
+        form.hidden = false; bAbrir.hidden = true; form.setAttribute('data-sucio', '1'); form.scrollIntoView({ block: 'nearest' });
+      }
+      form.append(titForm, el('div', { class: 'campos' }, [campo('Fuente', selF), lOtra, campo('Quién la produce', prod), campo('Cada cuánto se actualiza el dato', selFr)]),
         el('div', { class: 'sub-t', text: '¿La tenemos?' }), ten, campo('Comentario', com), el('div', { class: 'fila', style: 'align-items:center' }, [bAdd, bCancel]));
       // Conclusión
       const ev = () => (datos && datos.evaluacion && datos.evaluacion[q.id]) || {};
