@@ -44,7 +44,7 @@ function api_(accion, arg) {
   const ACCIONES = { obtenerConfig: obtenerConfig, obtenerResultados: obtenerResultados, guardarParaQue: guardarParaQue, guardarPregunta: guardarPregunta,
     guardarVotos: guardarVotos, guardarInsumo: guardarInsumo, borrarInsumo: borrarInsumo, guardarEvaluacion: guardarEvaluacion, agregarPriorizada: agregarPriorizada,
     fijarDimensiones: fijarDimensiones, ocultarPregunta: ocultarPregunta, fijarActores: fijarActores, fijarGrupos: fijarGrupos, fijarPriorizadas: fijarPriorizadas,
-    cargarSimulacion: cargarSimulacion, borrarSimulacion: borrarSimulacion };
+    cargarSimulacion: cargarSimulacion, borrarSimulacion: borrarSimulacion, limpiarTodo: limpiarTodo };
   try {
     if (!ACCIONES[accion]) throw new Error('Acción desconocida');
     return salida_({ ok: true, data: ACCIONES[accion](arg) });
@@ -414,6 +414,18 @@ function borrarSimulacion(r) {
     quitar(hoja_('Evaluacion'), 1, S);
     quitar(libro_().getSheetByName('Matriz'), 2, S); // hoja de la versión anterior, si existe
     if (config_('simulacion') === true) quitar(hoja_('Config'), 0, function (v) { return ['dimensiones', 'actores', 'simulacion', 'priorizadas'].indexOf(v) >= 0; });
+  });
+  return { ok: true };
+}
+
+/* ---------- Dejar la hoja en blanco para el taller (borra todas las respuestas, también las de prueba) ---------- */
+function limpiarTodo(r) {
+  validarClave_(r);
+  if (!r || r.confirmar !== 'BORRAR') throw new Error('Falta confirmar.');
+  conLock_(function () {
+    ['ParaQue', 'Preguntas', 'Votos', 'Insumos', 'Evaluacion'].forEach(function (n) { const sh = hoja_(n); if (sh.getLastRow() > 1) sh.deleteRows(2, sh.getLastRow() - 1); });
+    const old = libro_().getSheetByName('Matriz'); if (old && old.getLastRow() > 1) old.deleteRows(2, old.getLastRow() - 1);
+    quitarFilas_('Config', function (f) { return ['dimensiones', 'actores', 'simulacion', 'priorizadas'].indexOf(f[0]) >= 0; });
   });
   return { ok: true };
 }
