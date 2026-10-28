@@ -230,6 +230,7 @@
       else if (nombre === 'guardarPregunta') ok({ ok: true, id: 'Q9' + Math.floor(Math.random() * 90 + 10) });
       else if (nombre === 'fijarDimensiones') { D.activas = arg.lista; DEMO.config.activas = arg.lista; ok({ ok: true, activas: arg.lista }); }
       else if (nombre === 'ocultarPregunta') { const q = D.preguntas.find(x => x.id === arg.id); if (q) q.oculta = arg.oculta; D.ranking = D.preguntas.filter(x => !x.oculta).sort((a, b) => b.votos - a.votos); ok({ ok: true }); }
+      else if (nombre === 'fijarActores') { const base = DEMO.config.destinos.filter(x => x.marco !== 'Agregado en el taller'); DEMO.config.destinos = base.concat(arg.lista.filter(a => !base.some(b => b.id === a)).map(a => ({ id: a, marco: 'Agregado en el taller' }))); D.destinos = DEMO.config.destinos; ok({ ok: true, destinos: D.destinos }); }
       else ok({ ok: true, filas: (arg && arg.filas || []).length });
     }, 80);
   }
@@ -265,6 +266,16 @@
     const s = el('select', { id: id }, [el('option', { value: '', text: vacio || 'Seleccione…' })].concat(opciones.map(o => el('option', { value: o, text: o }))));
     s.value = valor || ''; s.addEventListener('change', () => alCambiar(s.value)); return s;
   }
+  // Fuentes agrupadas por tipo: "Tipo · Fuente" se muestra dentro de un grupo con el nombre del tipo.
+  function selectorFuentes(id, valor, alCambiar) {
+    const s = el('select', { id: id }, [el('option', { value: '', text: 'Seleccione…' })]);
+    const grupos = {};
+    CFG.fuentes.forEach(f => { const i = f.indexOf(' · '); const g = i > 0 ? f.slice(0, i) : '';
+      if (!g) { s.appendChild(el('option', { value: f, text: f })); return; }
+      if (!grupos[g]) { grupos[g] = el('optgroup', { label: g }); s.appendChild(grupos[g]); }
+      grupos[g].appendChild(el('option', { value: f, text: f.slice(i + 3) })); });
+    s.value = valor || ''; s.addEventListener('change', () => alCambiar(s.value)); return s;
+  }
   function campo(etiqueta, control) { return el('label', { class: 'campo', for: control.id }, [etiqueta, control]); }
   function unica(opciones, valor, alCambiar, etiqueta) {
     const caja = el('div', { class: 'opciones', role: 'group', 'aria-label': etiqueta });
@@ -286,14 +297,14 @@
   const iconoDim = nombre => (CFG.dimensiones.find(d => d.nombre === nombre) || {}).icono || 'Lightbulb';
   function activas() { return (CFG.activas && CFG.activas.length) ? CFG.activas : CFG.dimensiones.map(d => d.nombre); }
   function destinos() { return CFG.destinos.map(d => d.id); }
-  // Las 9 más votadas se reparten por turnos: mesa 1 → 1, 4, 7; mesa 2 → 2, 5, 8; mesa 3 → 3, 6, 9.
-  function mesaDe(pos) { return pos < 9 ? String((pos % 3) + 1) : ''; }
+  // Las preguntas se reparten por turnos según el ranking: mesa 1 → 1, 4, 7…; mesa 2 → 2, 5, 8…; mesa 3 → 3, 6, 9…
+  function mesaDe(pos) { return String((pos % 3) + 1); }
 
   /* ================= Celular ================= */
   const CLAVE = 'taller-v4-celular';
   function celular() {
     let st = leer(CLAVE) || {};
-    st = Object.assign({ area: '', mesa: '', pq: {}, otro: '', otroEj: '', pqEnviado: false, mias: [], votos: [], votado: false, borrador: { texto: '', dims: [], destinos: [], decision: '' } }, st);
+    st = Object.assign({ area: '', mesa: '', pq: {}, otro: '', otroEj: '', actores: '', pqEnviado: false, mias: [], votos: [], votado: false, borrador: { texto: '', dims: [], destinos: [], decision: '' } }, st);
     const guardar = () => guardarLocal(CLAVE, st);
     const main = el('main');
     const err = el('div', { class: 'error', role: 'alert' });
@@ -343,18 +354,24 @@
         const otroEj = el('input', { type: 'text', id: 'otro-ej', maxlength: '300', placeholder: 'Ejemplo de decisión' }); otroEj.value = st.otroEj;
         otroEj.addEventListener('input', () => { st.otroEj = otroEj.value; guardar(); });
         kids.push(el('div', { class: 'tarjeta' }, [el('h2', { text: '✍️ ¿Otro para qué?' }), campo('Para qué', otro), campo('Ejemplo de decisión', otroEj)]));
+        const act = el('input', { type: 'text', id: 'actores', maxlength: '300', placeholder: 'Ej.: Personería, ICBF (separe con comas)' }); act.value = st.actores || '';
+        act.addEventListener('input', () => { st.actores = act.value; guardar(); });
+        kids.push(el('div', { class: 'tarjeta' }, [el('h2', { text: '📣 ¿A quién se le reporta esta información?' }),
+          el('p', { class: 'nota-p', text: 'Esta es la lista propuesta de actores. ¿Falta alguno?' }),
+          el('div', { class: 'chips' }, destinos().map(d => el('span', { class: 'tog', text: d }))),
+          campo('Actor que falta (opcional)', act)]));
         accion.textContent = st.pqEnviado ? 'Enviar de nuevo' : 'Enviar';
         accion.onclick = () => {
           const items = Object.keys(st.pq).map(k => ({ nombre: k, ejemplo: st.pq[k].ejemplo || '' }));
-          if (!items.length && !st.otro.trim()) { err.textContent = 'Marque al menos un para qué.'; return; }
+          if (!items.length && !st.otro.trim() && !(st.actores || '').trim()) { err.textContent = 'Marque al menos un para qué.'; return; }
           accion.disabled = true; accion.textContent = 'Enviando…';
-          llamar('guardarParaQue', { area: st.area, mesa: st.mesa, items: items, otro: st.otro, otroEjemplo: st.otroEj }, () => { st.pqEnviado = true; guardar(); gracias('Gracias. Veamos juntos los resultados en la pantalla.'); }, falla);
+          llamar('guardarParaQue', { area: st.area, mesa: st.mesa, items: items, otro: st.otro, otroEjemplo: st.otroEj, actores: st.actores || '' }, () => { st.pqEnviado = true; guardar(); gracias('Gracias. Veamos juntos los resultados en la pantalla.'); }, falla);
         };
       }
       if (vista === 'preguntas') {
         const b = st.borrador;
         kids.push(cabecera('Momento 2 · Qué queremos responder y a quién', 'Escriba preguntas', 'Una por vez. Marque a qué para qué responde (puede ser más de uno) y a quién se reporta.', 'Chat'));
-        kids.push(el('div', { class: 'consejo' }, [el('b', { text: 'Una buena pregunta dice qué se mide, en qué periodo, para qué y a quién va. ' }), 'Ej.: “¿Cuántas personas distintas atendemos cada mes?” → Planeación Distrital.']));
+        kids.push(el('div', { class: 'consejo' }, [el('b', { text: 'Una buena pregunta dice qué se mide, con qué frecuencia, para qué y a quién va. ' }), 'Ej.: “¿Cuántas personas distintas atendemos cada mes?” → Planeación Distrital.']));
         const t = el('textarea', { id: 'texto', maxlength: '300', placeholder: '¿Qué necesitamos saber?' }); t.value = b.texto;
         t.addEventListener('input', () => { b.texto = t.value; guardar(); });
         const d = el('input', { type: 'text', id: 'decision', maxlength: '300', placeholder: 'Ej.: definir cupos de alojamiento' }); d.value = b.decision;
@@ -469,7 +486,7 @@
     function lista() {
       if (!datos) return [];
       const out = [];
-      datos.ranking.forEach((q, i) => { if (i < 9 && mesaDe(i) === mesa) out.push({ q: q, pos: i + 1 }); });
+      datos.ranking.forEach((q, i) => { if (mesaDe(i) === mesa) out.push({ q: q, pos: i + 1 }); });
       Object.keys(st.filas).concat(st.extra).forEach(id => { if (!out.some(x => x.q.id === id)) { const i = datos.ranking.findIndex(q => q.id === id); const q = datos.preguntas.find(z => z.id === id); if (q) out.push({ q: q, pos: i + 1, extra: true }); } });
       return out;
     }
@@ -487,6 +504,7 @@
       tabs.hidden = false; bGuardar.disabled = false;
       const L = lista();
       if (!L.length) kids.push(el('div', { class: 'consejo', text: 'Aún no hay votación. Pulse “↻ Preguntas” cuando termine el momento 2.' }));
+      else if (L.length > 4) kids.push(el('div', { class: 'consejo', text: 'La mesa tiene ' + L.length + ' preguntas. Recomendación: profundizar en las 3 o 4 primeras; las demás pueden quedar para el diagnóstico.' }));
       if (st.tab === '3') {
         kids.push(cabecera('Momento 3 · 25 min', 'Qué tenemos, qué falta y cómo se usa', 'Para cada pregunta de la mesa: ¿con qué dato?, ¿lo tenemos?, si falta ¿qué ruta?, y ¿cómo se usa la respuesta?', 'Database'));
         L.forEach(x => {
@@ -514,7 +532,7 @@
           kids.push(el('div', { class: 'tarjeta' }, cab(x).concat([
             el('h2', { text: '¿Con qué dato se responde?' }),
             el('div', { class: 'campos' }, [
-              campo('Fuente', selector('f-' + x.q.id, CFG.fuentes, f.fuenteSel, v => { f.fuenteSel = v; lblOtra.hidden = v !== 'Otra'; guardar(); })), lblOtra,
+              campo('Fuente', selectorFuentes('f-' + x.q.id, f.fuenteSel, v => { f.fuenteSel = v; lblOtra.hidden = v !== 'Otra'; guardar(); })), lblOtra,
               campo('Quién la produce', selector('p-' + x.q.id, CFG.responsables, f.produce, v => { f.produce = v; guardar(); })),
               campo('Cada cuánto', selector('fr-' + x.q.id, CFG.frecuencias, f.frecuencia, v => { f.frecuencia = v; guardar(); }))]),
             el('h2', { text: '¿Lo tenemos?' }),
@@ -576,7 +594,7 @@
   function resultados() {
     document.body.classList.add('res');
     let tab = ({ '#preguntas': '2', '#matriz': '3' })[location.hash] || '1';
-    let fac = false, ultimo = null, seleccion = null;
+    let fac = false, ultimo = null, seleccion = null, selActores = null;
     const contador = el('div', { class: 'contador' }, [el('b', { text: '0' }), el('span', {})]);
     const tabs = el('div', { class: 'tabs', role: 'tablist' });
     const titulo = el('h1');
@@ -595,13 +613,23 @@
     function pintar(d) {
       ultimo = d;
       if (d.activas) CFG.activas = d.activas;
+      if (d.destinos) CFG.destinos = d.destinos;
       const wrap = el('div', { class: 'matriz-wrap' });
+      if (d.simulacion) wrap.appendChild(el('div', { class: 'aviso', style: 'border-radius:12px', text: '🧪 Datos simulados cargados para probar la herramienta. Bórrelos antes del taller (modo facilitador).' }));
+      if (fac) {
+        const est = el('span', { class: 'nota-p' });
+        const bSim = el('button', { type: 'button', class: 'btn-mini', text: '🧪 Cargar datos simulados' });
+        const bBor = el('button', { type: 'button', class: 'btn-mini', text: '🗑️ Borrar datos simulados' });
+        bSim.addEventListener('click', () => { est.textContent = 'Cargando simulación…'; llamar('cargarSimulacion', { clave: CLAVE_FAC }, () => { est.textContent = '✅ Simulación cargada'; seleccion = null; selActores = null; cargar(); }, e => { est.textContent = '⚠️ ' + e.message; }); });
+        bBor.addEventListener('click', () => { est.textContent = 'Borrando…'; llamar('borrarSimulacion', { clave: CLAVE_FAC }, () => { est.textContent = '✅ Simulación borrada'; seleccion = null; selActores = null; cargar(); }, e => { est.textContent = '⚠️ ' + e.message; }); });
+        wrap.appendChild(el('div', { class: 'fac' }, [el('b', { text: 'Prueba de la herramienta' }), el('div', { class: 'fila', style: 'flex-wrap:wrap' }, [bSim, bBor, est])]));
+      }
       if (tab === '1') {
         contador.firstChild.textContent = d.respuestasParaQue; contador.lastChild.textContent = 'respuestas';
         const max = Math.max(1, ...d.paraque.map(p => p.votos));
         const nombres = CFG.dimensiones.map(x => x.nombre);
         d.paraque.forEach(p => { if (nombres.indexOf(p.nombre) < 0) nombres.push(p.nombre); });
-        if (!seleccion) seleccion = (d.activas || []).slice();
+        if (!seleccion || (!seleccion.length && d.activas)) seleccion = (d.activas || []).slice();
         nombres.forEach(n => {
           const p = d.paraque.find(x => x.nombre === n) || { votos: 0, ejemplos: [] };
           const act = (d.activas || []).indexOf(n) >= 0;
@@ -620,7 +648,26 @@
           wrap.insertBefore(el('div', { class: 'fac' }, [el('b', { text: 'Modo facilitador: marque entre 3 y 5 dimensiones acordadas. Puede agregar una fusionada o renombrada.' }),
             el('div', { class: 'chips' }, seleccion.map(s => el('span', { class: 'tog', 'aria-pressed': 'true', text: s }))),
             el('div', { class: 'fila' }, [nuevo, bAdd]), bFijar]), wrap.firstChild);
-        } else if (d.activas) wrap.insertBefore(el('div', { class: 'objetivo', style: 'padding:0;margin:0' }, [el('div', {}, [el('b', { text: 'Dimensiones acordadas' }), d.activas.join(' · ')])]), wrap.firstChild);
+        } else if (d.activas) wrap.appendChild(el('div', { class: 'objetivo', style: 'padding:0;margin:0' }, [el('div', {}, [el('b', { text: 'Dimensiones acordadas' }), d.activas.join(' · ')])]));
+        // Actores a quienes se reporta: lista propuesta + sugeridos en el celular.
+        const dest = (d.destinos || CFG.destinos).map(x => x.id);
+        const sugeridos = (d.actores || []).filter(a => dest.indexOf(a.nombre) < 0);
+        if (!selActores) selActores = (d.destinos || CFG.destinos).filter(x => x.marco === 'Agregado en el taller').map(x => x.id);
+        const bloque = [el('h2', { text: '📣 A quién se reporta · ' + dest.length + ' actores' }), el('div', { class: 'chips' }, dest.map(n => el('span', { class: 'tog', 'aria-pressed': 'true', text: n })))];
+        if (sugeridos.length) bloque.push(el('p', { class: 'nota-p', text: 'Sugeridos en el celular:' }), el('div', { class: 'chips' }, sugeridos.map(a => {
+          const b = el('button', { type: 'button', class: 'tog', 'aria-pressed': selActores.indexOf(a.nombre) >= 0 ? 'true' : 'false', text: a.nombre + ' (' + a.votos + ')' });
+          if (fac) b.addEventListener('click', () => { const i = selActores.indexOf(a.nombre); if (i >= 0) selActores.splice(i, 1); else selActores.push(a.nombre); pintar(ultimo); });
+          return b; })));
+        else bloque.push(el('p', { class: 'nota-p', text: 'Aún no hay actores sugeridos.' }));
+        if (fac) {
+          const nuevoA = el('input', { type: 'text', id: 'actor-nuevo', maxlength: '60', placeholder: 'Agregar otro actor' });
+          const bAddA = el('button', { type: 'button', class: 'btn-mini', text: '+ Agregar' });
+          bAddA.addEventListener('click', () => { if (nuevoA.value.trim()) { selActores.push(nuevoA.value.trim()); pintar(ultimo); } });
+          const bFijA = el('button', { type: 'button', class: 'btn prim enviar', text: 'Agregar ' + selActores.length + ' actores a la lista del momento 2' });
+          bFijA.addEventListener('click', () => { bFijA.disabled = true; llamar('fijarActores', { lista: selActores, clave: CLAVE_FAC }, r => { CFG.destinos = r.destinos; d.destinos = r.destinos; pintar(d); }, e => { bFijA.disabled = false; bFijA.textContent = '⚠️ ' + e.message; }); });
+          bloque.push(el('div', { class: 'fila' }, [nuevoA, bAddA]), bFijA);
+        }
+        wrap.appendChild(el('div', { class: fac ? 'fac' : 'nota' }, bloque));
       }
       if (tab === '2') {
         contador.firstChild.textContent = d.votantes || d.preguntas.length; contador.lastChild.textContent = d.votantes ? 'votantes' : 'preguntas';
@@ -628,14 +675,14 @@
         const lista = hayVotos ? d.ranking : d.preguntas.slice().reverse();
         const max = Math.max(1, ...d.ranking.map(q => q.votos));
         if (!fac && !hayVotos) wrap.appendChild(el('p', { class: 'vacio', text: d.preguntas.length + ' preguntas escritas. Se ordenarán al votar.' }));
+        if (hayVotos) wrap.appendChild(el('div', { class: 'consejo', text: 'Todas las preguntas pasan a las mesas, repartidas por turnos según el ranking. Recomendación: profundizar en 3 o 4 por mesa; muchas preguntas restan profundidad y las demás pueden quedar para el diagnóstico.' }));
         lista.forEach((q, i) => {
           if (!fac && q.oculta) return;
-          if (hayVotos && i === 9) wrap.appendChild(el('div', { class: 'corte', text: 'Hasta aquí: 9 priorizadas · 3 por mesa (pasan a los momentos 3 y 4)' }));
           const extra = fac ? el('button', { type: 'button', class: 'btn-mini', text: q.oculta ? 'Mostrar' : 'Ocultar (repetida)' }) : null;
           if (extra) extra.addEventListener('click', () => llamar('ocultarPregunta', { id: q.id, oculta: !q.oculta, clave: CLAVE_FAC }, () => cargar(), e => { CLAVE_FAC = ''; extra.textContent = '⚠️ ' + e.message; }));
-          wrap.appendChild(el('div', { class: 'item' + (hayVotos && i < 9 ? ' pasa' : ''), style: q.oculta ? 'opacity:.45' : '' }, [
+          wrap.appendChild(el('div', { class: 'item' + (hayVotos ? ' pasa' : ''), style: q.oculta ? 'opacity:.45' : '' }, [
             el('div', { class: 'pos', text: hayVotos ? String(i + 1) : q.id }),
-            el('div', { class: 'txt' }, [hayVotos && i < 9 ? el('span', { class: 'mesa', text: 'Mesa ' + mesaDe(i) }) : null, q.texto,
+            el('div', { class: 'txt' }, [hayVotos ? el('span', { class: 'mesa', text: 'Mesa ' + mesaDe(i) }) : null, q.texto,
               el('div', { class: 'meta' }, q.dims.map(x => el('span', { class: 'chip-dim', text: x })).concat([q.destinos.length ? ' 📣 ' + q.destinos.join(', ') : '', ' · ' + (q.area || '')])), extra]),
             el('div', {}, [el('div', { class: 'pts', text: hayVotos ? '⭐ ' + q.votos : '' }), hayVotos ? el('div', { class: 'barra' }, [el('i', { style: 'width:' + Math.round(100 * q.votos / max) + '%' })]) : null])
           ]));
@@ -663,7 +710,7 @@
       }
       cuerpo.replaceChildren(wrap);
     }
-    const cargar = () => llamar('obtenerResultados', undefined, d => { if (!(fac && tab === '1' && document.activeElement && document.activeElement.id === 'dim-nueva')) pintar(d); else ultimo = d; });
+    const cargar = () => llamar('obtenerResultados', undefined, d => { if (!(fac && tab === '1' && document.activeElement && ['dim-nueva', 'actor-nuevo'].indexOf(document.activeElement.id) >= 0)) pintar(d); else ultimo = d; });
     pintarTabs(); cargar(); setInterval(cargar, 8000);
   }
 
