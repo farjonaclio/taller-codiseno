@@ -185,6 +185,8 @@ function guardarParaQue(r) {
   // Actores que faltan en la lista (separados por coma o punto y coma).
   limpiar_(r.actores).split(/[;,]/).map(corto_).filter(String).slice(0, 5)
     .forEach(function (a) { filas.push([ahora, envio, p.area, p.grupo, 'Actor: ' + a, '']); });
+  // Actores de la lista a quienes reporta esta persona.
+  lista_(r.reporta, nombresDestinos_(), 12).forEach(function (a) { filas.push([ahora, envio, p.area, p.grupo, 'Reporta: ' + a, '']); });
   if (!filas.length) throw new Error('Marque al menos un para qué.');
   conLock_(function () { escribir_('ParaQue', filas); });
   return { ok: true };
@@ -288,11 +290,12 @@ function ranking_() {
     .filter(function (q) { return !q.oculta; }).sort(function (a, b) { return (b.votos - a.votos) || (a.id < b.id ? -1 : 1); });
 }
 function obtenerResultados() {
-  const pq = {}, envPQ = {}, actores = {};
+  const pq = {}, envPQ = {}, actores = {}, reporta = {};
   filas_('ParaQue').forEach(function (f) {
     envPQ[f[1]] = true;
     const k = String(f[4]);
     if (k.indexOf('Actor: ') === 0) { const a = k.slice(7); actores[a] = (actores[a] || 0) + 1; return; }
+    if (k.indexOf('Reporta: ') === 0) { const a = k.slice(9); reporta[a] = (reporta[a] || 0) + 1; return; }
     if (!pq[k]) pq[k] = { nombre: k, votos: 0, ejemplos: [] };
     pq[k].votos++;
     if (f[5]) pq[k].ejemplos.push(f[5]);
@@ -305,7 +308,7 @@ function obtenerResultados() {
   const insumos = filas_('Insumos').map(function (f) {
     return { id: f[1], pregunta: f[2], fuente: f[3], produce: f[4], frecuencia: f[5], tenemos: f[6], comentario: f[7], grupo: String(f[8] || '') };
   });
-  return { activas: activas_(), destinos: destinos_(), grupos: grupos_(), actores: ordenar(actores),
+  return { activas: activas_(), destinos: destinos_(), grupos: grupos_(), actores: ordenar(actores), reporta: ordenar(reporta),
     simulacion: config_('simulacion') === true, paraque: Object.keys(pq).map(function (k) { return pq[k]; }).sort(function (a, b) { return b.votos - a.votos; }),
     respuestasParaQue: Object.keys(envPQ).length, preguntas: preguntas, ranking: ranking, votantes: Object.keys(votantes).length,
     priorizadas: priorizadasEfectivas_(ranking), priorizadasFijadas: !!priorizadasFijadas_(), insumos: insumos, evaluacion: evaluacion_() };
@@ -328,6 +331,7 @@ function cargarSimulacion(r) {
   });
   pq.push([ahora, 'SIM-03', areas[2], '', 'Otro: Proteger a NNA en tránsito [simulado]', '']);
   pq.push([ahora, 'SIM-05', areas[4], '', 'Actor: Personería Distrital [simulado]', '']);
+  for (let i = 0; i < 14; i++) [2, 1, 3, (i % 4) + 4].slice(0, 2 + (i % 3)).forEach(function (k) { pq.push([ahora, 'SIM-' + ('0' + (i + 1)).slice(-2), areas[i % areas.length], '', 'Reporta: ' + dest[k], '']); });
   pq.push([ahora, 'SIM-09', areas[8 % areas.length], '', 'Actor: Personería Distrital [simulado]', '']);
   pq.push([ahora, 'SIM-11', areas[10 % areas.length], '', 'Actor: Instituto Colombiano de Bienestar Familiar [simulado]', '']);
   const frec = ['Mensual', 'Trimestral', 'Mensual', 'Semestral', 'Mensual', 'Anual', 'Trimestral', 'Mensual', 'Mensual', 'Trimestral'];
