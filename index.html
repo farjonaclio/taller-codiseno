@@ -709,8 +709,13 @@
       bBor.addEventListener('click', () => { est.textContent = 'Borrando…'; llamar('borrarSimulacion', { clave: CLAVE_FAC }, () => { est.textContent = '✅ Simulación borrada'; seleccion = null; selActores = null; cargar(); }, e => { est.textContent = '⚠️ ' + e.message; }); });
       const selG = selector('sel-grupos', [2, 3, 4, 5, 6].map(n => [String(n), n + ' grupos']), d.grupos ? String(d.grupos) : '', v => {
         est.textContent = 'Guardando…'; llamar('fijarGrupos', { grupos: Number(v || 0), clave: CLAVE_FAC }, r => { est.textContent = '✅ ' + (r.grupos ? r.grupos + ' grupos' : 'Sin grupos'); cargar(); }, e => { est.textContent = '⚠️ ' + e.message; }); }, 'Sin grupos');
+      const bLim = el('button', { type: 'button', class: 'btn-mini', text: '🧹 Dejar la hoja en blanco para el taller' });
+      let arm = false;
+      bLim.addEventListener('click', () => {
+        if (!arm) { arm = true; bLim.textContent = '⚠️ Borra TODAS las respuestas (también las reales). Toque otra vez para confirmar'; bLim.classList.add('on'); setTimeout(() => { arm = false; bLim.textContent = '🧹 Dejar la hoja en blanco para el taller'; bLim.classList.remove('on'); }, 6000); return; }
+        est.textContent = 'Limpiando…'; llamar('limpiarTodo', { clave: CLAVE_FAC, confirmar: 'BORRAR' }, () => { est.textContent = '✅ Hoja en blanco'; seleccion = null; selActores = null; cargar(true); }, e => { est.textContent = '⚠️ ' + e.message; }); });
       return el('div', { class: 'fac' }, [el('b', { text: 'Modo facilitador' }),
-        el('div', { class: 'fila', style: 'flex-wrap:wrap;align-items:center;flex:none' }, [el('label', { class: 'campo', for: 'sel-grupos', style: 'flex-direction:row;align-items:center;flex:none' }, ['Grupos de trabajo (opcional): ', selG]), bSim, bBor, est])]);
+        el('div', { class: 'fila', style: 'flex-wrap:wrap;align-items:center;flex:none' }, [el('label', { class: 'campo', for: 'sel-grupos', style: 'flex-direction:row;align-items:center;flex:none' }, ['Grupos de trabajo (opcional): ', selG]), bSim, bBor, bLim, est])]);
     }
     function pintar(d) {
       ultimo = d; msg.textContent = '';
