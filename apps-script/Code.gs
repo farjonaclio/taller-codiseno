@@ -77,7 +77,8 @@ const HOJAS = {
 };
 
 function hoja_(nombre) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  // HOJA_ID (en Datos.gs) apunta a la hoja de respuestas; si no está, usa la hoja a la que está vinculado el script.
+  const ss = (typeof HOJA_ID !== 'undefined' && HOJA_ID) ? SpreadsheetApp.openById(HOJA_ID) : SpreadsheetApp.getActiveSpreadsheet();
   const cols = HOJAS[nombre];
   let sh = ss.getSheetByName(nombre);
   if (!sh) sh = ss.insertSheet(nombre);
