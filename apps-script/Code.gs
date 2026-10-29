@@ -44,7 +44,7 @@ function api_(accion, arg) {
   const ACCIONES = { obtenerConfig: obtenerConfig, obtenerResultados: obtenerResultados, guardarParaQue: guardarParaQue, guardarPregunta: guardarPregunta,
     guardarVotos: guardarVotos, guardarInsumo: guardarInsumo, borrarInsumo: borrarInsumo, guardarEvaluacion: guardarEvaluacion, agregarPriorizada: agregarPriorizada,
     fijarDimensiones: fijarDimensiones, ocultarPregunta: ocultarPregunta, fijarActores: fijarActores, fijarGrupos: fijarGrupos, fijarPriorizadas: fijarPriorizadas,
-    cargarSimulacion: cargarSimulacion, borrarSimulacion: borrarSimulacion, limpiarTodo: limpiarTodo };
+    cargarSimulacion: cargarSimulacion, borrarSimulacion: borrarSimulacion, limpiarTodo: limpiarTodo, editarPregunta: editarPregunta };
   try {
     if (!ACCIONES[accion]) throw new Error('Acción desconocida');
     return salida_({ ok: true, data: ACCIONES[accion](arg) });
@@ -225,6 +225,23 @@ function guardarVotos(r) {
   const envio = token_(r) || Utilities.getUuid().slice(0, 8), ahora = new Date();
   conLock_(function () { quitarFilas_('Votos', function (f) { return f[1] === envio; }); escribir_('Votos', ids.map(function (id) { return [ahora, envio, p.area, p.grupo, id]; })); });
   return { ok: true, votos: ids.length };
+}
+// El líder (modo facilitador) corrige cualquier pregunta: texto, qué mide, frecuencia, para qué, a quién y decisión.
+function editarPregunta(r) {
+  validarClave_(r);
+  const texto = limpiar_(r.texto);
+  if (texto.length < 10) throw new Error('La pregunta es muy corta.');
+  const dims = lista_(r.dims, null, 8);
+  if (!dims.length) throw new Error('Marque al menos un para qué.');
+  return conLock_(function () {
+    const sh = hoja_('Preguntas'), datos = filas_('Preguntas');
+    const i = datos.findIndex(function (f) { return f[1] === r.id; });
+    if (i < 0) throw new Error('Pregunta no encontrada.');
+    const f = datos[i];
+    const fila = [f[0], f[1], f[2], f[3], texto, dims.join('; '), lista_(r.destinos, null, 10).map(corto_).join('; '), limpiar_(r.decision), f[8], enLista_(r.frecuencia, FRECUENCIAS), corto_(r.mide), f[11]];
+    sh.getRange(i + 2, 1, 1, fila.length).setValues([fila]);
+    return { ok: true, id: f[1] };
+  });
 }
 function ocultarPregunta(r) {
   validarClave_(r);
