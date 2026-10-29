@@ -359,6 +359,7 @@
     const accion = el('button', { type: 'button', class: 'btn prim enviar' });
     const nav = el('div', { class: 'nav' }, [el('div', { class: 'dentro' }, [atras, accion])]);
     app.replaceChildren(...[aviso(), barraLogos(false), main, nav, datalistResp()].filter(Boolean));
+    if (['paraque', 'preguntas', 'votar'].indexOf(inicial) >= 0 && !st.area) inicial = 'inicio';
     let vista = inicial || 'inicio', datos = null, reloj = null, refrescos = [], avisoOk = '';
     atras.addEventListener('click', () => ir('inicio'));
     function ir(v) { vista = v; err.textContent = ''; pintar(); window.scrollTo(0, 0); }
@@ -553,9 +554,9 @@
       const libres = d.ranking.filter(q => d.priorizadas.indexOf(q.id) < 0);
       if (!libres.length) return null;
       const s = el('select', { id: 'agregar' }, [el('option', { value: '', text: 'Elegir pregunta…' })].concat(libres.map(q => el('option', { value: q.id, text: q.id + ' · ' + q.texto.slice(0, 90) }))));
-      const b = el('button', { type: 'button', class: 'btn-mini', text: '+ Agregar' });
+      const b = el('button', { type: 'button', class: 'btn-mini', text: '➕ Sumar esta pregunta' });
       const ok = el('div', { class: 'ok-txt' });
-      b.addEventListener('click', () => { if (!s.value) return; b.disabled = true; llamar('agregarPriorizada', { id: s.value }, () => { ok.textContent = 'Agregada.'; pintar(); }, e => { b.disabled = false; ok.textContent = '⚠️ ' + e.message; }); });
+      b.addEventListener('click', () => { if (!s.value) { ok.textContent = 'Primero elija una pregunta en la lista.'; return; } b.disabled = true; llamar('agregarPriorizada', { id: s.value }, () => { ok.textContent = 'Agregada.'; pintar(); }, e => { b.disabled = false; ok.textContent = '⚠️ ' + e.message; }); });
       return el('div', { class: 'tarjeta' }, [el('h2', { text: '➕ ¿Trabajamos otra pregunta?' }), el('p', { class: 'nota-p', text: 'Recomendación: 3 o 4 preguntas para ganar profundidad. Se pueden agregar más.' }), el('div', { class: 'fila' }, [s, b]), ok]);
     }
 
@@ -700,6 +701,28 @@
       tabs.replaceChildren(...TABS.map(([k, t]) => { const b = el('button', { type: 'button', role: 'tab', 'aria-selected': tab === k ? 'true' : 'false', text: t });
         b.addEventListener('click', () => { tab = k; pintarTabs(); if (ultimo) pintar(ultimo); }); return b; }));
     }
+    let editando = null;
+    // Formulario del líder para corregir una pregunta (no se repinta mientras está abierto).
+    function formEditar(q) {
+      const v = { texto: q.texto, mide: q.mide || '', frecuencia: q.frecuencia || '', dims: q.dims.slice(), destinos: q.destinos.slice(), decision: q.decision || '' };
+      const dest = destinos(); const otros = v.destinos.filter(x => dest.indexOf(x) < 0); v.destinos = v.destinos.filter(x => dest.indexOf(x) >= 0);
+      const tx = el('textarea', { id: 'ed-texto', maxlength: '300' }); tx.value = v.texto;
+      const md = el('input', { type: 'text', id: 'ed-mide', maxlength: '80' }); md.value = v.mide;
+      const dc = el('input', { type: 'text', id: 'ed-dec', maxlength: '300' }); dc.value = v.decision;
+      const ot = el('input', { type: 'text', id: 'ed-otro', maxlength: '120', placeholder: 'Otro actor (separe con comas)' }); ot.value = otros.join(', ');
+      const fr = selector('ed-frec', CFG.frecuencias, v.frecuencia, x => { v.frecuencia = x; }, 'Sin indicar');
+      const dimsOp = activas().concat(v.dims.filter(x => activas().indexOf(x) < 0));
+      const est = el('span', { class: 'nota-p' });
+      const bG = el('button', { type: 'button', class: 'btn prim enviar', style: 'flex:none', text: 'Guardar cambios' });
+      const bC = el('button', { type: 'button', class: 'btn-mini', text: 'Cancelar' });
+      bC.addEventListener('click', () => { editando = null; pintar(ultimo); });
+      bG.addEventListener('click', () => { bG.disabled = true; est.textContent = 'Guardando…';
+        llamar('editarPregunta', { clave: CLAVE_FAC, id: q.id, texto: tx.value, mide: md.value, frecuencia: v.frecuencia, dims: v.dims, destinos: v.destinos.concat(ot.value.split(/[;,]/).map(x => x.trim()).filter(Boolean)), decision: dc.value },
+          () => { editando = null; cargar(true); }, e => { bG.disabled = false; est.textContent = '⚠️ ' + e.message; if (/[Cc]lave/.test(e.message)) CLAVE_FAC = ''; }); });
+      return el('div', { class: 'fac', 'data-sucio': '1', style: 'margin-top:8px' }, [el('b', { text: '✏️ Editar ' + q.id + ' (líder)' }), campo('Pregunta', tx), el('div', { class: 'campos' }, [campo('Qué se mide', md), campo('Frecuencia', fr)]),
+        el('div', { class: 'sub-t', text: 'Para qué' }), multiple(dimsOp, v.dims, () => {}), el('div', { class: 'sub-t', text: 'A quién se reporta' }), multiple(dest, v.destinos, () => {}), ot,
+        campo('Decisión', dc), el('div', { class: 'fila', style: 'align-items:center;flex:none' }, [bG, bC, est])]);
+    }
     const errFac = e => { CLAVE_FAC = ''; msg.textContent = '⚠️ ' + e.message; };
     function panelFac(d) {
       const est = el('span', { class: 'nota-p' });
@@ -773,7 +796,7 @@
       if (tab === '2') {
         contador.firstChild.textContent = d.votantes || d.preguntas.length; contador.lastChild.textContent = d.votantes ? 'votantes' : 'preguntas';
         const hayVotos = d.votantes > 0;
-        const lista = hayVotos ? d.ranking : d.preguntas.slice().reverse();
+        const lista = hayVotos ? d.ranking.concat(fac ? d.preguntas.filter(q => q.oculta) : []) : d.preguntas.slice().reverse();
         const max = Math.max(1, ...d.ranking.map(q => q.votos));
         if (!hayVotos) wrap.appendChild(el('p', { class: 'vacio', text: d.preguntas.length + ' preguntas escritas. Se ordenarán al votar.' }));
         else wrap.appendChild(el('div', { class: 'consejo', text: 'Priorizamos 3 o 4 preguntas para trabajarlas en los momentos 3 y 4' + (d.priorizadasFijadas ? '' : ' (por ahora, las 4 más votadas)') + '. Se pueden agregar más; las demás quedan para el diagnóstico.' }));
@@ -786,10 +809,13 @@
             bO.addEventListener('click', () => llamar('ocultarPregunta', { id: q.id, oculta: !q.oculta, clave: CLAVE_FAC }, () => cargar(), errFac));
             const bP = el('button', { type: 'button', class: 'btn-mini' + (prio ? ' on' : ''), text: prio ? '★ Priorizada' : '☆ Priorizar' });
             bP.addEventListener('click', () => { const ids = d.priorizadas.filter(x => x !== q.id); if (!prio) ids.push(q.id); llamar('fijarPriorizadas', { ids: ids, clave: CLAVE_FAC }, () => cargar(), errFac); });
-            extra = el('div', { class: 'chips', style: 'margin-top:6px' }, [bP, bO]);
+            const bE = el('button', { type: 'button', class: 'btn-mini', text: '✏️ Editar' });
+            bE.addEventListener('click', () => { editando = q.id; pintar(ultimo); });
+            extra = el('div', { class: 'chips', style: 'margin-top:6px' }, [bP, bE, bO]);
+            if (editando === q.id) extra = formEditar(q);
           }
           wrap.appendChild(el('div', { class: 'item' + (prio ? ' pasa' : ''), style: q.oculta ? 'opacity:.45' : '' }, [
-            el('div', { class: 'pos', text: hayVotos ? String(i + 1) : q.id }),
+            el('div', { class: 'pos', text: q.oculta ? '—' : hayVotos ? String(i + 1) : q.id }),
             el('div', { class: 'txt' }, [prio ? el('span', { class: 'prio', text: 'Se trabaja en 3 y 4' }) : null, el('b', { text: q.texto }),
               el('div', { class: 'meta' }, [[q.mide ? '📏 ' + q.mide : '', q.frecuencia ? '🔁 ' + q.frecuencia : '', q.destinos.length ? '📣 ' + q.destinos.join(', ') : '', q.decision ? '✅ ' + q.decision : ''].filter(Boolean).join(' · ')]),
               el('div', {}, q.dims.map(x => el('span', { class: 'chip-dim', text: x }))), extra]),
@@ -797,6 +823,8 @@
           ]));
         });
       }
+      if (fac && (tab === '3' || tab === '4')) wrap.appendChild(el('div', { class: 'fac' }, [el('b', { text: 'Para corregir insumos, conclusiones o cómo se ve: ' }),
+        el('a', { href: urlVista(tab === '3' ? 'tenemos' : 'comose'), target: '_blank', rel: 'noopener', class: 'btn-mini', style: 'text-decoration:none;align-self:flex-start' }, ['✏️ Abrir la vista de trabajo para editar (cualquier dato se puede corregir allí)'])]));
       if (tab === '3') {
         contador.firstChild.textContent = d.insumos.filter(x => d.priorizadas.indexOf(x.pregunta) >= 0).length; contador.lastChild.textContent = 'insumos';
         const ins = d.insumos.filter(x => d.priorizadas.indexOf(x.pregunta) >= 0);
@@ -843,7 +871,7 @@
       }
       cuerpo.replaceChildren(wrap);
     }
-    const cargar = forzar => llamar('obtenerResultados', undefined, d => { actualizado.textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-CO'); if (forzar === true || !(fac && document.activeElement && ['dim-nueva', 'actor-nuevo'].indexOf(document.activeElement.id) >= 0)) pintar(d); else ultimo = d; }, e => { actualizado.textContent = '⚠️ Sin conexión'; });
+    const cargar = forzar => llamar('obtenerResultados', undefined, d => { actualizado.textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-CO'); if (forzar === true || !(cuerpo.querySelector('[data-sucio="1"]') || (fac && document.activeElement && ['dim-nueva', 'actor-nuevo'].indexOf(document.activeElement.id) >= 0))) pintar(d); else ultimo = d; }, e => { actualizado.textContent = '⚠️ Sin conexión'; });
     pintarTabs(); cargar(); setInterval(cargar, 8000);
   }
 
